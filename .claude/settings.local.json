@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(echo \"EXIT:$?\")",
+      "WebSearch",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:www.postman.com)"
+    ]
+  }
+}

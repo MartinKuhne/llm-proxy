@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="LlmProxy/LlmProxy.csproj" />
+  <Project Path="LlmProxy.Tests/LlmProxy.Tests.csproj" />
+</Solution>

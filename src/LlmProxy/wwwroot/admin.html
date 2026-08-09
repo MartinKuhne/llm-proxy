@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>llm-proxy Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%232563eb'/><text x='50' y='68' font-size='58' font-family='system-ui,sans-serif' font-weight='700' fill='white' text-anchor='middle'>L</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+    h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1rem; margin: 1.75rem 0 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.4rem; }
+    label { display: block; margin-bottom: 0.4rem; font-weight: 600; font-size: 0.9rem; }
+    select { width: 100%; padding: 0.45rem 0.6rem; margin-bottom: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; }
+    button { padding: 0.45rem 1rem; cursor: pointer; border-radius: 6px; font-size: 0.9rem; }
+    .btn-primary { background: #2563eb; color: #fff; border: none; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+    .btn-secondary:hover { background: #f9fafb; }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.88rem; }
+    th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid #e5e7eb; }
+    th { background: #f9fafb; font-weight: 600; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+    .ok     { background: #dcfce7; color: #166534; }
+    .err    { background: #fee2e2; color: #991b1b; }
+    .auto   { background: #dbeafe; color: #1e40af; }
+    .forced { background: #fef3c7; color: #92400e; }
+    #msg { font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem; min-height: 1.2em; }
+    .empty { color: #9ca3af; font-style: italic; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+    .stat-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.75rem 1rem; }
+    .stat-card .label { font-size: 0.75rem; color: #6b7280; margin-bottom: 0.2rem; }
+    .stat-card .value { font-size: 1.4rem; font-weight: 700; }
+    .error-body { max-height: 100px; overflow-y: auto; max-width: 300px; font-size: 0.75rem; background: #fef2f2; padding: 0.25rem; border-radius: 4px; margin-top: 0.25rem; white-space: pre-wrap; word-break: break-all; }
+    .nav-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+    .nav-tab { padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.9rem; }
+    .nav-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .nav-tab:hover:not(.active) { background: #f9fafb; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+  </style>
+</head>
+<body>
+  <h1>LLM Proxy Admin</h1>
+
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="showTab('today', event)">Today</button>
+    <button class="nav-tab" onclick="showTab('30days', event)">Last 30 Days</button>
+  </div>
+
+  <div id="tab-today" class="tab-content active">
+    <h2 id="usageHeading">Usage for </h2>
+    <div class="stat-grid" id="statGrid"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Provider</th><th>Model</th>
+          <th class="num">Requests</th>
+          <th class="num">Prompt Tokens</th>
+          <th class="num">Cached Tokens</th>
+          <th class="num">Completion Tokens</th>
+          <th class="num">Total Tokens</th>
+          <th class="num">Avg Prompt t/s</th>
+          <th class="num">Avg Completion t/s</th>
+        </tr>
+      </thead>
+      <tbody id="usageTbody"></tbody>
+    </table>
+
+    <h2>Active Provider</h2>
+    <label for="sel">Override</label>
+    <select id="sel"></select>
+    <div>
+      <button class="btn-primary" onclick="setActive()">Set Active</button>
+      <button class="btn-secondary" onclick="resetAuto()">Reset to Auto</button>
+    </div>
+    <p id="msg"></p>
+
+    <h2>Provider Status</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Model</th><th>Priority</th><th>Cost</th><th>Comp</th><th>Capabilities</th><th>Status</th><th>Last Error</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div id="tab-30days" class="tab-content">
+    <h2>Usage for Last 30 Days</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th class="num">Requests</th>
+          <th class="num">Prompt Tokens</th>
+          <th class="num">Completion Tokens</th>
+          <th class="num">Total Tokens</th>
+        </tr>
+      </thead>
+      <tbody id="usage30DaysTbody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function fmt(n) { return Number(n).toLocaleString(); }
+    function setUsageHeading() {
+      const today = new Date();
+      const formattedDate = today.toLocaleDateString(undefined, {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long'
+      });
+      document.getElementById('usageHeading').textContent = 'Usage for ' + formattedDate;
+    }
+    setUsageHeading();
+
+    async function loadUsage() {
+      let data;
+      try {
+        const r = await fetch('/admin/api/usage/today');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        data = await r.json();
+      } catch (e) {
+        document.getElementById('usageTbody').innerHTML =
+          '<tr><td colspan="9" class="empty">Failed to load usage: ' + esc(e.message) + '</td></tr>';
+        return;
+      }
+      const tbody = document.getElementById('usageTbody');
+      tbody.innerHTML = '';
+
+      if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">No usage data for today.</td></tr>';
+        document.getElementById('statGrid').innerHTML = '';
+        return;
+      }
+
+      const totReq    = data.reduce((s, r) => s + r.requestCount, 0);
+      const totPrompt = data.reduce((s, r) => s + r.promptTokens, 0);
+      const totCached = data.reduce((s, r) => s + r.cachedTokens, 0);
+      const totComp   = data.reduce((s, r) => s + r.completionTokens, 0);
+      const totTok    = data.reduce((s, r) => s + r.totalTokens, 0);
+      const avgPps    = data.reduce((s, r) => s + r.avgPromptTokensPerSec, 0) / data.length;
+      const avgCps    = data.reduce((s, r) => s + r.avgCompletionTokensPerSec, 0) / data.length;
+
+      document.getElementById('statGrid').innerHTML = [
+        ['Requests',         fmt(totReq)],
+        ['Prompt Tokens',    fmt(totPrompt)],
+        ['Cached Tokens',    fmt(totCached)],
+        ['Completion Tokens',fmt(totComp)],
+        ['Total Tokens',     fmt(totTok)],
+        ['Avg Prompt t/s',   avgPps.toFixed(1)],
+        ['Avg Completion t/s', avgCps.toFixed(1)],
+      ].map(([label, value]) =>
+        `<div class="stat-card"><div class="label">${label}</div><div class="value">${value}</div></div>`
+      ).join('');
+
+      data.forEach(s => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + esc(s.providerName) + '</td>' +
+          '<td>' + esc(s.model) + '</td>' +
+          '<td class="num">' + fmt(s.requestCount) + '</td>' +
+          '<td class="num">' + fmt(s.promptTokens) + '</td>' +
+          '<td class="num">' + fmt(s.cachedTokens) + '</td>' +
+          '<td class="num">' + fmt(s.completionTokens) + '</td>' +
+          '<td class="num">' + fmt(s.totalTokens) + '</td>' +
+          '<td class="num">' + s.avgPromptTokensPerSec.toFixed(1) + '</td>' +
+          '<td class="num">' + s.avgCompletionTokensPerSec.toFixed(1) + '</td>';
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadProviders() {
+      let data;
+      try {
+        const r = await fetch('/admin/api/providers');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        data = await r.json();
+      } catch (e) {
+        document.getElementById('tbody').innerHTML =
+          '<tr><td colspan="8" class="empty">Failed to load providers: ' + esc(e.message) + '</td></tr>';
+        return;
+      }
+      const sel = document.getElementById('sel');
+      const prevKey = sel.value;
+
+      sel.innerHTML = '<option value="">Auto (best available)</option>';
+      data.providers.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.fullModelKey;
+        opt.textContent = p.name + ' \u2014 ' + p.model;
+        if (p.isForced) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      if (!data.isForced && prevKey) sel.value = prevKey;
+
+      const tbody = document.getElementById('tbody');
+      tbody.innerHTML = '';
+      data.providers.forEach(p => {
+        const tags = p.isForced ? ' <span class="badge forced">forced</span>'
+                   : p.isAuto   ? ' <span class="badge auto">auto</span>'
+                   : '';
+        const status = p.errorCount === 0
+          ? '<span class="badge ok">OK</span>'
+          : '<span class="badge err">' + p.errorCount + ' error(s)</span>';
+        
+        let capsHtml = '';
+        if (p.capabilities) {
+          const caps = Object.entries(p.capabilities);
+          if (caps.length === 1 && caps[0][0] === '*') {
+            capsHtml = '<span class="badge ok">*</span>';
+          } else {
+            capsHtml = caps.map(([name, cfg]) =>
+              `<span class="badge ${cfg.supported ? 'ok' : 'err'}" title="Cost: ${esc(String(cfg.cost))}, Complexity: ${esc(String(cfg.complexity))}">${esc(name)}</span>`
+            ).join(' ');
+          }
+        }
+        
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + esc(p.name) + tags + '</td>' +
+          '<td>' + esc(p.model) + '</td>' +
+          '<td>' + p.priority + '</td>' +
+          '<td>' + p.cost + '</td>' +
+          '<td>' + p.complexity + '</td>' +
+          '<td>' + capsHtml + '</td>' +
+          '<td>' + status + '</td>' +
+          '<td>' + (p.lastError
+                  ? new Date(p.lastError).toLocaleString() + (p.lastErrorStatusCode ? ' <strong>[' + p.lastErrorStatusCode + ']</strong>' : '') + '<br><small>' + esc(p.lastErrorMessage ?? '') + '</small>' + (p.lastErrorBody ? '<div class="error-body">' + esc(p.lastErrorBody) + '</div>' : '')
+                  : '\u2014') + '</td>';
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadUsage30Days() {
+      let data;
+      try {
+        const r = await fetch('/admin/api/usage/last30days');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        data = await r.json();
+      } catch (e) {
+        document.getElementById('usage30DaysTbody').innerHTML =
+          '<tr><td colspan="5" class="empty">Failed to load usage: ' + esc(e.message) + '</td></tr>';
+        return;
+      }
+      const tbody = document.getElementById('usage30DaysTbody');
+      tbody.innerHTML = '';
+
+      if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No usage data available.</td></tr>';
+        return;
+      }
+
+      const totReq    = data.reduce((s, r) => s + r.requestCount, 0);
+      const totPrompt = data.reduce((s, r) => s + r.promptTokens, 0);
+      const totComp   = data.reduce((s, r) => s + r.completionTokens, 0);
+      const totTok    = data.reduce((s, r) => s + r.totalTokens, 0);
+
+      data.forEach(s => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + esc(s.date) + '</td>' +
+          '<td class="num">' + fmt(s.requestCount) + '</td>' +
+          '<td class="num">' + fmt(s.promptTokens) + '</td>' +
+          '<td class="num">' + fmt(s.completionTokens) + '</td>' +
+          '<td class="num">' + fmt(s.totalTokens) + '</td>';
+        tbody.appendChild(tr);
+      });
+
+      const tf = document.createElement('tr');
+      tf.style.fontWeight = '600';
+      tf.innerHTML =
+        '<td>Total</td>' +
+        '<td class="num">' + fmt(totReq) + '</td>' +
+        '<td class="num">' + fmt(totPrompt) + '</td>' +
+        '<td class="num">' + fmt(totComp) + '</td>' +
+        '<td class="num">' + fmt(totTok) + '</td>';
+      tbody.appendChild(tf);
+    }
+
+    function showTab(tabName, evt) {
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      evt.target.classList.add('active');
+      document.getElementById('tab-' + tabName).classList.add('active');
+    }
+
+    async function setActive() {
+      const key = document.getElementById('sel').value;
+      if (!key) { await resetAuto(); return; }
+      try {
+        const r = await fetch('/admin/api/providers/active', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key })
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        document.getElementById('msg').textContent = 'Provider set.';
+      } catch (e) {
+        document.getElementById('msg').textContent = 'Error: ' + e.message;
+        return;
+      }
+      await loadProviders();
+    }
+
+    async function resetAuto() {
+      try {
+        const r = await fetch('/admin/api/providers/active', { method: 'DELETE' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        document.getElementById('msg').textContent = 'Reset to auto.';
+      } catch (e) {
+        document.getElementById('msg').textContent = 'Error: ' + e.message;
+        return;
+      }
+      await loadProviders();
+    }
+
+    loadUsage();
+    loadProviders();
+    loadUsage30Days();
+    setInterval(loadUsage, 30000);
+    setInterval(loadProviders, 10000);
+    setInterval(loadUsage30Days, 60000);
+  </script>
+</body>
+</html>

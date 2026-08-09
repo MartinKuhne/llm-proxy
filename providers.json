@@ -1,0 +1,63 @@
+{
+  "Providers": [
+    {
+      "Name": "OpenAI",
+      "BaseUrl": "https://api.openai.com/v1",
+      "ApiKey": "",
+      "Priority": 1,
+      "Model": "gpt-4",
+      "SendMaxCompletionTokens": true,
+      "Cost": 8,
+      "Complexity": 10,
+      "Capabilities": {
+        "chat": { "Cost": 8, "Complexity": 10, "Supported": true },
+        "embeddings": { "Cost": 2, "Complexity": 3, "Supported": true },
+        "transcriptions": { "Cost": 5, "Complexity": 8, "Supported": false }
+      },
+      "Description": "Primary provider - OpenAI GPT models"
+    },
+    {
+      "Name": "Anthropic",
+      "BaseUrl": "https://api.anthropic.com/v1",
+      "ApiKey": "",
+      "Priority": 2,
+      "Model": "claude-3-sonnet-20240229",
+      "SendMaxCompletionTokens": false,
+      "Cost": 5,
+      "Complexity": 8,
+      "Capabilities": {
+        "chat": { "Cost": 5, "Complexity": 8, "Supported": true },
+        "embeddings": { "Cost": 3, "Complexity": 5, "Supported": true },
+        "transcriptions": { "Cost": 6, "Complexity": 9, "Supported": false }
+      },
+      "Description": "Secondary provider - Anthropic Claude models"
+    },
+    {
+      "Name": "Whisper",
+      "BaseUrl": "https://api.example.com/v1",
+      "ApiKey": "",
+      "Priority": 3,
+      "Model": "whisper-large-v3",
+      "SendMaxCompletionTokens": false,
+      "Cost": 4,
+      "Complexity": 6,
+      "Capabilities": {
+        "transcriptions": { "Cost": 4, "Complexity": 6, "Supported": true }
+      },
+      "Description": "Transcription specialist"
+    },
+    {
+      "Name": "Universal",
+      "BaseUrl": "https://api.universal.com/v1",
+      "ApiKey": "",
+      "Priority": 4,
+      "Model": "universal-all",
+      "SendMaxCompletionTokens": true,
+      "Cost": 7,
+      "Complexity": 7,
+      "Capabilities": "*",
+      "Description": "Fallback provider with all capabilities"
+    }
+  ],
+  "CurrentProvider": null
+}
