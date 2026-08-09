@@ -250,4 +250,4 @@ The application will start on `http://localhost:5000` by default.
 
 ## License
 
-MIT
+[MIT](./LICENSE.md)
