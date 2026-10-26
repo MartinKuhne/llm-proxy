@@ -4,16 +4,26 @@ using LlmProxy.Application.Logging;
 using LlmProxy.Domain;
 using System.Text.Json;
 
+/// <summary>
+/// Logs token usage statistics to daily JSONL files.
+/// </summary>
 public class FileTokenCountLogger : ITokenCountLogger
 {
+    private static readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ILogger<FileTokenCountLogger> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FileTokenCountLogger"/> class.
+    /// </summary>
     public FileTokenCountLogger(ILogger<FileTokenCountLogger> logger)
     {
         _logger = logger;
         Directory.CreateDirectory(AppPaths.LogDirectory);
     }
 
+    /// <summary>
+    /// Asynchronously logs token count statistics for a completed request.
+    /// </summary>
     public async Task LogTokenCountAsync(TokenCountLog log, CancellationToken cancellationToken = default)
     {
         var logFileName = $"tokens-{log.Date:yyyy-MM-dd}.jsonl";
@@ -33,9 +43,17 @@ public class FileTokenCountLogger : ITokenCountLogger
         };
 
         var jsonLine = JsonSerializer.Serialize(logEntry);
-        
-        await File.AppendAllLinesAsync(logFilePath, new[] { jsonLine }, cancellationToken);
-        
+
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            await File.AppendAllLinesAsync(logFilePath, [jsonLine], cancellationToken);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+
         _logger.LoggedTokenCount(logFileName, log.TotalTokens);
     }
 }
