@@ -1,12 +1,30 @@
 namespace LlmProxy.Application.Services;
 
+using LlmProxy.Application.Logging;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
+/// <summary>
+/// Reads token usage statistics from daily JSONL log files.
+/// </summary>
 public class FileUsageReader : IUsageReader
 {
     private static readonly JsonSerializerOptions _jsonOptions =
         new() { PropertyNameCaseInsensitive = true };
 
+    private readonly ILogger<FileUsageReader>? _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FileUsageReader"/> class.
+    /// </summary>
+    public FileUsageReader(ILogger<FileUsageReader>? logger = null)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Reads token usage statistics grouped by provider and model for today.
+    /// </summary>
     public async Task<IReadOnlyList<ProviderUsageStat>> ReadTodayAsync(CancellationToken cancellationToken = default)
     {
         var utc = DateTime.UtcNow;
@@ -40,18 +58,17 @@ public class FileUsageReader : IUsageReader
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
 
-                var entry = JsonSerializer.Deserialize<FileUsageReaderLogEntry>(line, _jsonOptions);
-                if (entry == null)
+                if (!TryParseEntry(filePath, line, out var entry) || entry == null)
                     continue;
 
                 var entryTime = entry.Date;
                 if (entryTime < startTimeUtc || entryTime >= endTimeUtc)
                     continue;
 
-            var key = $"{entry.Provider}|{entry.Model}";
-                 if (!stats.TryGetValue(key, out var stat))
-                 {
-                     stat = new ProviderUsageStat { Provider = entry.Provider, Model = entry.Model };
+                var key = $"{entry.Provider}|{entry.Model}";
+                if (!stats.TryGetValue(key, out var stat))
+                {
+                    stat = new ProviderUsageStat { Provider = entry.Provider, Model = entry.Model };
                     stats[key] = stat;
                 }
 
@@ -67,6 +84,9 @@ public class FileUsageReader : IUsageReader
         return [.. stats.Values];
     }
 
+    /// <summary>
+    /// Reads daily token usage statistics for the last 30 days.
+    /// </summary>
     public async Task<IReadOnlyList<DailyUsageStat>> ReadLast30DaysAsync(CancellationToken cancellationToken = default)
     {
         var utcNow = DateTime.UtcNow;
@@ -79,7 +99,7 @@ public class FileUsageReader : IUsageReader
         {
             var fileName = $"tokens-{date:yyyy-MM-dd}.jsonl";
             var filePath = Path.Combine(AppPaths.LogDirectory, fileName);
-            
+
             if (!File.Exists(filePath))
                 continue;
 
@@ -90,8 +110,7 @@ public class FileUsageReader : IUsageReader
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
 
-                var entry = JsonSerializer.Deserialize<FileUsageReaderLogEntry>(line, _jsonOptions);
-                if (entry == null)
+                if (!TryParseEntry(filePath, line, out var entry) || entry == null)
                     continue;
 
                 var dateKey = DateOnly.FromDateTime(entry.Date.Date);
@@ -112,5 +131,20 @@ public class FileUsageReader : IUsageReader
         var result = stats.Values.ToList();
         result.Sort((a, b) => a.Date.CompareTo(b.Date));
         return result;
+    }
+
+    private bool TryParseEntry(string filePath, string line, out FileUsageReaderLogEntry? entry)
+    {
+        try
+        {
+            entry = JsonSerializer.Deserialize<FileUsageReaderLogEntry>(line, _jsonOptions);
+            return entry != null;
+        }
+        catch (JsonException ex)
+        {
+            _logger?.InvalidJsonLineSkipped(filePath, line, ex);
+            entry = null;
+            return false;
+        }
     }
 }
