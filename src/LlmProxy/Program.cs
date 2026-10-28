@@ -1,4 +1,5 @@
 using Serilog;
+using LlmProxy.Api.Middleware;
 using LlmProxy.Application;
 using LlmProxy.Application.Configuration;
 using LlmProxy.Application.Services;
@@ -64,6 +65,9 @@ builder.Services.AddSingleton<ConversationIndex>();
 builder.Services.AddSingleton<ConversationLocks>();
 builder.Services.AddSingleton<ConversationIdResolver>();
 builder.Services.AddSingleton<AuditBodyCapture>();
+
+// Operator surface access: on by default, the admin API, provider API and operator pages answer loopback only.
+builder.Services.AddSingleton(builder.Configuration.GetSection("Admin").Get<AdminAccessOptions>() ?? new AdminAccessOptions());
 
 // The logger holds no per-request state, so one instance serves the whole process: its constructor creates the
 // conversation directory once instead of on every proxied request.
@@ -131,6 +135,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseSerilogRequestLogging();
+
+// Gate the operator surface before anything can serve it: static files and controllers both sit behind this.
+app.UseMiddleware<AdminAccessMiddleware>();
 
 // Operator pages (conversation list and replay) are plain static files under wwwroot.
 app.UseStaticFiles();
