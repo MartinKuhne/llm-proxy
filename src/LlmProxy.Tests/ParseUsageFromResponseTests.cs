@@ -20,6 +20,7 @@ public class ParseUsageFromResponseTests
             providersConfig: new ProvidersConfig(),
             conversationLogger: Substitute.For<IConversationLogger>(),
             conversationIdResolver: new ConversationIdResolver(),
+            auditBodyCapture: new AuditBodyCapture(new Microsoft.Extensions.Logging.Abstractions.NullLogger<AuditBodyCapture>()),
             loggerFactory: Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
     }
 

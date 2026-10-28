@@ -22,6 +22,12 @@ public static class ConversationLoggerLoggerExtensions
     private static readonly Action<ILogger, Exception?> _conversationLoggingDisabled =
         LoggerMessage.Define(LogLevel.Debug, 104, "Conversation audit logging is disabled");
 
+    private static readonly Action<ILogger, string, int, Exception?> _conversationReadLineSkipped =
+        LoggerMessage.Define<string, int>(LogLevel.Warning, 105, "Skipped unreadable line {LineNumber} of conversation file {FileName} while reading it back");
+
+    private static readonly Action<ILogger, string, int, Exception?> _conversationRead =
+        LoggerMessage.Define<string, int>(LogLevel.Debug, 106, "Read {EventCount} events of conversation file {FileName}");
+
     public static void ConversationWritten(this ILogger logger, string fileName, int eventCount)
         => _conversationWritten(logger, fileName, eventCount, null);
 
@@ -36,4 +42,10 @@ public static class ConversationLoggerLoggerExtensions
 
     public static void ConversationLoggingDisabled(this ILogger logger)
         => _conversationLoggingDisabled(logger, null);
+
+    public static void ConversationReadLineSkipped(this ILogger logger, string fileName, int lineNumber)
+        => _conversationReadLineSkipped(logger, fileName, lineNumber, null);
+
+    public static void ConversationRead(this ILogger logger, string fileName, int eventCount)
+        => _conversationRead(logger, fileName, eventCount, null);
 }

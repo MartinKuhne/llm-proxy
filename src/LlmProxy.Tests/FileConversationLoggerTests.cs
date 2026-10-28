@@ -137,16 +137,16 @@ public class FileConversationLoggerTests : IDisposable
     }
 
     [Fact]
-    public void SafeFileName_ReplacesUnsafeCharacters()
+    public void FileName_ReplacesUnsafeCharacters()
     {
-        Assert.Equal("_", FileConversationLogger.SafeFileName(null));
-        Assert.Equal("_", FileConversationLogger.SafeFileName(string.Empty));
-        Assert.Equal("_", FileConversationLogger.SafeFileName("."));
-        Assert.Equal("._", FileConversationLogger.SafeFileName(".."));
-        Assert.Equal("a_b_c", FileConversationLogger.SafeFileName("a/b\\c"));
-        Assert.Equal("a_b", FileConversationLogger.SafeFileName("a:b"));
-        Assert.Equal("safe-id_1.x", FileConversationLogger.SafeFileName("safe-id_1.x"));
-        Assert.Equal("a._.b", FileConversationLogger.SafeFileName("a...b"));
+        Assert.Equal("_", ConversationFileNames.FileName(null));
+        Assert.Equal("_", ConversationFileNames.FileName(string.Empty));
+        Assert.Equal("_", ConversationFileNames.FileName("."));
+        Assert.Equal("._", ConversationFileNames.FileName(".."));
+        Assert.Equal("a_b_c", ConversationFileNames.FileName("a/b\\c"));
+        Assert.Equal("a_b", ConversationFileNames.FileName("a:b"));
+        Assert.Equal("safe-id_1.x", ConversationFileNames.FileName("safe-id_1.x"));
+        Assert.Equal("a._.b", ConversationFileNames.FileName("a...b"));
     }
 
     [Theory]
@@ -156,9 +156,9 @@ public class FileConversationLoggerTests : IDisposable
     [InlineData("/")]
     [InlineData(".")]
     [InlineData("")]
-    public void SafeFileName_NeverProducesPathTraversal(string conversationId)
+    public void FileName_NeverProducesPathTraversal(string conversationId)
     {
-        var name = FileConversationLogger.SafeFileName(conversationId);
+        var name = ConversationFileNames.FileName(conversationId);
 
         Assert.DoesNotContain("..", name, StringComparison.Ordinal);
         Assert.DoesNotContain("/", name, StringComparison.Ordinal);

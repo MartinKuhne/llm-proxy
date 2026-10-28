@@ -1,6 +1,5 @@
 namespace LlmProxy.Application.Services;
 
-using System.Text;
 using System.Text.Json;
 using LlmProxy.Application.Logging;
 using LlmProxy.Domain;
@@ -13,8 +12,6 @@ using LlmProxy.Domain;
 /// </remarks>
 public class FileConversationLogger : IConversationLogger
 {
-    private const int MaxFileNameLength = 100;
-
     private static readonly JsonSerializerOptions _jsonOptions =
         new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -63,30 +60,6 @@ public class FileConversationLogger : IConversationLogger
             failure.ConversationId,
             cancellationToken);
 
-    /// <summary>Makes a conversation id safe to use as a file name: no separators, no traversal, capped length.</summary>
-    /// <param name="conversationId">Raw conversation id.</param>
-    internal static string SafeFileName(string? conversationId)
-    {
-        if (string.IsNullOrWhiteSpace(conversationId))
-        {
-            return "_";
-        }
-
-        var builder = new StringBuilder(Math.Min(conversationId.Length, MaxFileNameLength));
-        foreach (var character in conversationId)
-        {
-            if (builder.Length >= MaxFileNameLength)
-            {
-                break;
-            }
-
-            builder.Append(char.IsLetterOrDigit(character) || character is '-' or '_' or '.' ? character : '_');
-        }
-
-        var name = builder.ToString().Replace("..", "._").TrimEnd('.');
-        return name.Length > 0 ? name : "_";
-    }
-
     private async Task WriteAsync(
         Func<IReadOnlyList<ConversationEvent>> buildEvents,
         string conversationId,
@@ -107,13 +80,14 @@ public class FileConversationLogger : IConversationLogger
                 return;
             }
 
-            var fileName = $"{SafeFileName(conversationId)}.jsonl";
+            var fileName = ConversationFileNames.FileName(conversationId) + ConversationFileNames.Extension;
             var lines = events.Select(evt => JsonSerializer.Serialize(evt, _jsonOptions)).ToList();
 
             await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await File.AppendAllLinesAsync(Path.Combine(_directory, fileName), lines, cancellationToken).ConfigureAwait(false);
+                await File.AppendAllLinesAsync(
+                    ConversationFileNames.PathFor(_directory, conversationId), lines, cancellationToken).ConfigureAwait(false);
             }
             finally
             {

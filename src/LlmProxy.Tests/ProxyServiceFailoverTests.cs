@@ -44,6 +44,7 @@ public class ProxyServiceFailoverTests
             new ProvidersConfig(),
             Substitute.For<IConversationLogger>(),
             new ConversationIdResolver(),
+            new AuditBodyCapture(NullLogger<AuditBodyCapture>.Instance),
             NullLoggerFactory.Instance);
     }
 
