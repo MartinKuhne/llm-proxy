@@ -43,6 +43,10 @@ sql/
 *.userosscache
 *.sln.docstates
 
+# Conversation audit logs (contain user content - never commit)
+logs/conversations/
+conversations/
+
 # Mac
 .DS_Store
 

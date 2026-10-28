@@ -1,4 +1,5 @@
 using Serilog;
+using LlmProxy.Application;
 using LlmProxy.Application.Configuration;
 using LlmProxy.Application.Services;
 using System.Text.Json;
@@ -49,6 +50,19 @@ builder.Services.AddSingleton(providersConfig);
 builder.Services.AddHttpClient();
 builder.Services.ConfigureHttpClientDefaults(b =>
     b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(600)));
+
+// Conversation audit log: the optional "Conversations" section overrides the defaults. The configured directory is
+// published through AppPaths so the logger and the index always read and write the same folder.
+var conversationOptions = builder.Configuration.GetSection("Conversations").Get<ConversationOptions>() ?? new ConversationOptions();
+if (!string.IsNullOrWhiteSpace(conversationOptions.Directory))
+{
+    AppPaths.ConversationDirectory = conversationOptions.Directory;
+}
+
+builder.Services.AddSingleton(conversationOptions);
+builder.Services.AddSingleton<ConversationIndex>();
+builder.Services.AddScoped<IConversationLogger, FileConversationLogger>();
+
 builder.Services.AddScoped<ITokenCountLogger, FileTokenCountLogger>();
 builder.Services.AddScoped<IUsageReader, FileUsageReader>();
 builder.Services.AddScoped<IProxyService, ProxyService>();
