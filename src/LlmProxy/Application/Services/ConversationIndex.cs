@@ -1,6 +1,7 @@
 namespace LlmProxy.Application.Services;
 
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using LlmProxy.Application.Logging;
 using LlmProxy.Domain;
@@ -21,16 +22,26 @@ public sealed class ConversationIndex
 
     private static readonly SemaphoreSlim _writeLock = new(1, 1);
 
+    /// <summary>How long a failed load is held off before another attempt is made.</summary>
+    internal static readonly TimeSpan LoadRetryDelay = TimeSpan.FromSeconds(30);
+
     private readonly ConcurrentDictionary<string, ConversationSummary> _summaries = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _loadLock = new(1, 1);
     private readonly ILogger<ConversationIndex> _logger;
 
     private volatile bool _loaded;
+    private Exception? _loadFailure;
 
     public ConversationIndex(ILogger<ConversationIndex> logger)
     {
         _logger = logger;
     }
+
+    /// <summary>
+    /// When the next load attempt may run. A failed load pushes it out by <see cref="LoadRetryDelay"/> so the
+    /// rebuild is not repeated on every proxied request; moving it into the past makes the retry immediate.
+    /// </summary>
+    internal DateTimeOffset NextLoadAttemptAt { get; set; }
 
     /// <summary>Returns the summary for a conversation, creating it on first use.</summary>
     /// <param name="conversationId">Conversation to look up.</param>
@@ -73,6 +84,12 @@ public sealed class ConversationIndex
     /// conversation files in the directory.
     /// </summary>
     /// <param name="cancellationToken">Cancels the load.</param>
+    /// <remarks>
+    /// A load that fails is held off for <see cref="LoadRetryDelay"/> rather than retried on every proxied request:
+    /// a locked or unreadable index would otherwise put the whole rebuild cost on user-facing traffic over and over.
+    /// During the hold the original failure is replayed, and <c>_loaded</c> deliberately stays false so the rebuild
+    /// is still made once the obstruction clears instead of being lost.
+    /// </remarks>
     public async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
     {
         if (_loaded)
@@ -88,17 +105,33 @@ public sealed class ConversationIndex
                 return;
             }
 
-            var indexPath = Path.Combine(AppPaths.ConversationDirectory, IndexFileName);
-            if (File.Exists(indexPath))
+            if (_loadFailure is { } failure && DateTimeOffset.UtcNow < NextLoadAttemptAt)
             {
-                await LoadIndexAsync(indexPath, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await RebuildAsync(cancellationToken).ConfigureAwait(false);
+                ExceptionDispatchInfo.Capture(failure).Throw();
             }
 
-            _loaded = true;
+            try
+            {
+                var indexPath = Path.Combine(AppPaths.ConversationDirectory, IndexFileName);
+                if (File.Exists(indexPath))
+                {
+                    await LoadIndexAsync(indexPath, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await RebuildAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                _loaded = true;
+                _loadFailure = null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _loadFailure = ex;
+                NextLoadAttemptAt = DateTimeOffset.UtcNow + LoadRetryDelay;
+                _logger.ConversationIndexLoadFailed((int)LoadRetryDelay.TotalSeconds, ex);
+                throw;
+            }
         }
         finally
         {

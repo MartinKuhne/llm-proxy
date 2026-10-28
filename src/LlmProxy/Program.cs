@@ -64,7 +64,10 @@ builder.Services.AddSingleton<ConversationIndex>();
 builder.Services.AddSingleton<ConversationLocks>();
 builder.Services.AddSingleton<ConversationIdResolver>();
 builder.Services.AddSingleton<AuditBodyCapture>();
-builder.Services.AddScoped<IConversationLogger, FileConversationLogger>();
+
+// The logger holds no per-request state, so one instance serves the whole process: its constructor creates the
+// conversation directory once instead of on every proxied request.
+builder.Services.AddSingleton<IConversationLogger, FileConversationLogger>();
 builder.Services.AddScoped<IConversationReader, FileConversationReader>();
 
 builder.Services.AddScoped<ITokenCountLogger, FileTokenCountLogger>();
@@ -95,6 +98,19 @@ foreach (var provider in providers)
     startupLogger.LogInformation(
         "Provider configured: {Name} {BaseUrl} model={Model} smct={SendMaxCompletionTokens} priority={Priority}",
         provider.Name, provider.BaseUrl, provider.Model, provider.SendMaxCompletionTokens, provider.Priority);
+}
+
+// Load the conversation index here rather than on the first proxied request, so the whole first-read cost does not
+// land on a user. A failure is not fatal and is not treated as loaded: the index keeps its rebuild and retries
+// after its own back-off instead of re-running it on every request.
+var conversationIndex = app.Services.GetRequiredService<ConversationIndex>();
+try
+{
+    await conversationIndex.EnsureLoadedAsync();
+}
+catch (Exception ex)
+{
+    startupLogger.LogWarning(ex, "Conversation index could not be loaded at startup; the audit log will retry it later");
 }
 
 // Global exception handler for unhandled exceptions

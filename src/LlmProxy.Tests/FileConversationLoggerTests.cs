@@ -429,6 +429,34 @@ public class FileConversationLoggerTests : IDisposable
         Assert.Equal(2, summary.RecordedMessageCount);
     }
 
+    /// <summary>
+    /// A client disconnect is not a logging failure: cancellation propagates rather than being caught and logged at
+    /// Error, while real failures keep being swallowed so auditing never breaks a proxied request.
+    /// </summary>
+    [Fact]
+    public async Task CancelledWrite_PropagatesInsteadOfBeingSwallowedAsAnError()
+    {
+        var logger = CreateLogger();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => logger.LogRequestAsync(Request("alpha", "hi"), cts.Token));
+
+        Assert.False(File.Exists(Path.Combine(_directory, "alpha.jsonl")));
+    }
+
+    [Fact]
+    public async Task RealWriteFailure_IsSwallowedSoAuditingNeverBreaksARequest()
+    {
+        var logger = CreateLogger();
+
+        // A directory sitting where the conversation file belongs makes the append fail.
+        Directory.CreateDirectory(Path.Combine(_directory, "alpha.jsonl"));
+
+        await logger.LogRequestAsync(Request("alpha", "hi"), CancellationToken.None);
+    }
+
     /// <summary>Number of messages each request turn stored, keyed by request id.</summary>
     private static Dictionary<string, int> StoredSliceByTurn(IEnumerable<ConversationEvent> events) =>
         events

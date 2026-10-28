@@ -249,6 +249,54 @@ public class ConversationIndexTests : IDisposable
         Assert.Equal("alpha", Assert.Single(index.All()).Id);
     }
 
+    /// <summary>
+    /// A failed load must not turn into a full rebuild on every proxied request. The first failure is held off and
+    /// replayed, and the index is deliberately not marked loaded, so the rebuild still happens once the
+    /// obstruction clears rather than being lost.
+    /// </summary>
+    [Fact]
+    public async Task EnsureLoadedAsync_AfterAFailure_HoldsOffAndRetriesOnceTheHoldExpires()
+    {
+        Directory.CreateDirectory(_directory);
+        var indexPath = Path.Combine(_directory, ConversationIndex.IndexFileName);
+        File.AppendAllLines(indexPath, new[] { JsonSerializer.Serialize(Summary("conv-1", 3), _camelCase) });
+
+        var blocker = new FileStream(indexPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        var index = CreateIndex();
+        try
+        {
+            var first = await Assert.ThrowsAnyAsync<Exception>(() => index.EnsureLoadedAsync(CancellationToken.None));
+            Assert.True(index.NextLoadAttemptAt > DateTimeOffset.UtcNow);
+
+            // Held off: the same failure is replayed, so no second load is paid for.
+            var second = await Assert.ThrowsAnyAsync<Exception>(() => index.EnsureLoadedAsync(CancellationToken.None));
+            Assert.Same(first, second);
+        }
+        finally
+        {
+            blocker.Dispose();
+        }
+
+        // Once the hold expires the same index loads, so the rebuild is not lost.
+        index.NextLoadAttemptAt = DateTimeOffset.UtcNow;
+        await index.EnsureLoadedAsync(CancellationToken.None);
+
+        var summary = Assert.Single(index.All());
+        Assert.Equal("conv-1", summary.Id);
+        Assert.Equal(3, summary.EventCount);
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_WhenTheLoadSucceeds_KeepsNoBackOffBehind()
+    {
+        WriteConversationFile("alpha.jsonl", Event(ConversationEventKind.Request, "alpha", _start));
+
+        var index = CreateIndex();
+        await index.EnsureLoadedAsync(CancellationToken.None);
+
+        Assert.Equal(default, index.NextLoadAttemptAt);
+    }
+
     private static ConversationIndex CreateIndex() => new(Substitute.For<ILogger<ConversationIndex>>());
 
     private void WriteConversationFile(string fileName, params ConversationEvent[] events)

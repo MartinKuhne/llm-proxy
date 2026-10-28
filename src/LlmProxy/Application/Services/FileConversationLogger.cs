@@ -122,8 +122,11 @@ public class FileConversationLogger : IConversationLogger
                 conversationLock.Release();
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Real failures are swallowed: auditing must never break a proxied request. Cancellation is not a
+            // failure, it is the caller going away, and propagating it keeps a plain client disconnect out of the
+            // error log.
             _logger.ConversationLoggingFailed(conversationId, ex);
         }
     }

@@ -28,6 +28,9 @@ public static class ConversationLoggerLoggerExtensions
     private static readonly Action<ILogger, string, int, Exception?> _conversationRead =
         LoggerMessage.Define<string, int>(LogLevel.Debug, 106, "Read {EventCount} events of conversation file {FileName}");
 
+    private static readonly Action<ILogger, int, Exception?> _conversationIndexLoadFailed =
+        LoggerMessage.Define<int>(LogLevel.Error, 107, "Could not load the conversation index; retrying in {RetryAfterSeconds}s");
+
     public static void ConversationWritten(this ILogger logger, string fileName, int eventCount)
         => _conversationWritten(logger, fileName, eventCount, null);
 
@@ -48,4 +51,7 @@ public static class ConversationLoggerLoggerExtensions
 
     public static void ConversationRead(this ILogger logger, string fileName, int eventCount)
         => _conversationRead(logger, fileName, eventCount, null);
+
+    public static void ConversationIndexLoadFailed(this ILogger logger, int retryAfterSeconds, Exception exception)
+        => _conversationIndexLoadFailed(logger, retryAfterSeconds, exception);
 }
