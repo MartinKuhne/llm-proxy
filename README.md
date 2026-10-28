@@ -253,13 +253,17 @@ plain JSONL — grep it, back it up, ship it elsewhere.
 | `<logs>/conversations/index.jsonl` | Append-only roll-up that makes listing cheap; delete it and the index is rebuilt from the conversation files |
 
 Event kinds: `request`, `thinking`, `response`, `tool_call`, `tool_result`, `error`.
-The `request` event carries the whole inbound body; the assistant side is decomposed so
-reasoning and each tool call are individually visible. Streaming responses are folded back
-into one assistant message, so a streamed turn looks the same as a buffered one.
+The `request` event carries the inbound body with `messages` removed and only the messages
+the log did not hold yet in `data.messages`, so a resent history is not written again every
+turn; the assistant side is decomposed so reasoning and each tool call are individually
+visible. Streaming responses are folded back into one assistant message, so a streamed turn
+looks the same as a buffered one.
 
 ### Conversation identity
 
-1. The `X-Conversation-Id` request header is used verbatim when the client sends one.
+1. The `X-Conversation-Id` request header is used when the client sends one that matches
+   `[A-Za-z0-9._-]` up to 100 characters. A value outside that shape is ignored, so a
+   client cannot name a conversation it does not own or fold two ids onto one file.
 2. Otherwise the id is derived from the conversation opening — SHA-256 over the first
    system message plus the first user message — so the multi-turn history an OpenAI client
    resends each turn keeps landing in the same file.
@@ -301,8 +305,10 @@ responses with token usage, and errors, each with a collapsible raw-JSON view.
 
 The log contains user content. The directory is git-ignored and must be protected at the
 filesystem level. API keys are never written: the `Authorization` header is not part of
-the captured payload, and multipart uploads are recorded as a field and file summary
-rather than as binary. Set `Conversations:Enabled=false` if you must not retain content.
+the captured payload, a string value named `api_key`, `apikey`, `authorization`, `token`,
+`secret` or `password` anywhere in the body is stored as `[masked]`, and multipart uploads
+are recorded as a field and file summary rather than as binary. Set
+`Conversations:Enabled=false` if you must not retain content.
 
 ## Running
 

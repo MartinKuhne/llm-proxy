@@ -47,6 +47,11 @@ sql/
 logs/conversations/
 conversations/
 
+# Runtime Serilog output, rolling daily as logs/llm-proxy<yyyyMMdd>.log. The *.NUnit.log and
+# msbuild.log rules above do not match these, so a smoke run would otherwise get committed.
+# (The pre-existing, already-tracked logs/llm-proxy-20260608.log is unaffected.)
+src/LlmProxy/logs/*.log
+
 # Mac
 .DS_Store
 

@@ -21,13 +21,53 @@
 - [x] REST API: `GET /admin/api/conversations/{id}` returning the full event trail
 - [x] Web UI: conversation list with date filter and paging, one row per conversation
 - [x] Web UI: detail view replaying the whole conversation
-- [ ] Store only the new messages on each `request` event. Today the client's whole resent
-      history is stored every turn, so a long conversation file grows quadratically. The
-      detail view already renders only the new ones; the writer should stop storing the rest.
+- [x] Store only the new messages on each `request` event: the body keeps the request fields
+      with `messages` removed and the new slice goes in `data.messages`, so a long
+      conversation no longer grows quadratically.
+- [x] Make one conversation's write atomic, and only per conversation: the dedupe snapshot is
+      read inside a per-conversation lock, so concurrent turns of one conversation cannot
+      store the same messages twice while different conversations stay parallel.
+- [x] Validate `X-Conversation-Id` against `[A-Za-z0-9._-]{1,100}` and ignore anything else,
+      so a client cannot name a conversation it does not own.
+- [x] Mask string values named `api_key`, `apikey`, `authorization`, `token`, `secret` or
+      `password` anywhere in the captured body.
 - [ ] Compact `index.jsonl`. It takes one line per recorded turn-phase and is never
       rewritten, so it outgrows the conversations it describes over time.
 - [ ] Retention policy, e.g. `Conversations:RetentionDays`, with a startup sweep.
 - [ ] Return the resolved `X-Conversation-Id` on the proxy response so a client that did
       not send one can still correlate its later turns with the recorded conversation.
-- [ ] Redaction rules for known-secret shapes (API keys, bearer tokens) appearing inside
-      prompt or tool payload content, not just in headers.
+- [ ] Redact known-secret *shapes* (API keys, bearer tokens) inside prompt and tool payload
+      content. The first pass masks by field name only; a secret embedded in prose or under an
+      unrecognised key still gets through.
+
+### Open, pending a decision
+
+- [ ] **H5** Unauthenticated `/admin/*` read surface: the conversation list and replay
+      endpoints expose every recorded prompt and response to anyone who can reach the port.
+      Blocked on a decision about the deployment posture before changing
+      `Conversations:Enabled` defaults or adding auth middleware.
+- [ ] **H4** Mix a per-client discriminator into the derived conversation id, so two clients
+      with an identical opening stop landing in one file. Blocked on the same decision as H5.
+
+### Open, known limitations
+
+- [ ] **M1** Chained prefix fingerprints: only the boundary message is verified, so an edit
+      to an earlier message with an unchanged tail is silently not recorded.
+- [ ] **M2** Aggregate payload budget: `MaxFieldChars` bounds each string leaf, not the total
+      size of a node, so many medium fields can still add up to a very large event.
+- [ ] **M7** Unbounded `StringBuilder` growth in `SseAssistantAssembler` â€” a long-lived or
+      hostile stream can grow it without a ceiling.
+- [ ] **L2** Serialisation churn: request bodies are parsed, re-serialised and re-parsed
+      between capture, factory and writer.
+- [ ] **L5** No caching of derived values (fingerprints, file paths) across turns that reuse
+      them.
+- [ ] **L6** `SetIfMissing` treats an empty string as "missing", so an explicit empty value
+      can be overwritten later.
+- [ ] **L10** `AppPaths.ConversationDirectory` is process-wide mutable static state injected
+      at startup rather than passed in.
+- [ ] **L11** Buffer copies on the audit read path that could be avoided with spans or pooled
+      buffers.
+- [ ] **I1** `UseStaticFiles` ordering: the operator pages are served before the API
+      middleware, so the ordering is incidental rather than deliberate.
+- [ ] **I2** Cancelled-request audit gap: a request cancelled mid-flight leaves the request
+      event without its response, so the trail does not say what happened.

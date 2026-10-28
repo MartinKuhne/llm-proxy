@@ -27,8 +27,12 @@ Store the audit trail as **one JSON Lines file per conversation** under
 ```
 
 Event kinds: `request`, `thinking`, `response`, `tool_call`, `tool_result`, `error`.
-A `request` event carries the whole inbound body; the assistant side is decomposed so
-thinking and each tool call are individually visible on the timeline.
+A `request` event carries the inbound body with `messages` removed and only the messages
+the log did not hold yet in `data.messages` — clients resend the whole history every turn,
+so storing it verbatim would write it once per turn. See the
+[Conversations API contract](conversations-api.md) for the exact fields. The assistant
+side is decomposed so thinking and each tool call are individually visible on the
+timeline.
 
 Listing conversations is served from a separate **append-only index**
 (`<logs>/conversations/index.jsonl`), mirrored in memory by `ConversationIndex`.
@@ -85,6 +89,17 @@ turn, so nothing in a single request says "this is turn 7 of the same chat".
 - Derived ids group by conversation opening, so a client that edits its first message
   starts a new file. Acceptable for an audit log and documented.
 - Ids are hashed, so no user content leaks into file names.
+- Two different clients whose conversation opens identically — the same boilerplate
+  system prompt plus the same first user message — derive the same id and land in the
+  same conversation file, where their turns interleave. This is not confined to the
+  rejected "hash only" alternative above: it applies to every request that reaches the
+  derived path, i.e. every client that does not send `X-Conversation-Id`. A per-client
+  discriminator in the seed would separate them; that change is still pending a decision
+  on the deployment posture (see the backlog).
+- A client-supplied `X-Conversation-Id` is accepted only when it matches
+  `[A-Za-z0-9._-]` up to 100 characters. Anything else is ignored and the request
+  derives its own id, so a client cannot name a conversation it does not own and cannot
+  fold two distinct ids onto one file.
 
 ---
 
