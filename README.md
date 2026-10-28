@@ -9,7 +9,8 @@ A smart LLM proxy that automatically routes requests to the best available provi
 - **Cost & Complexity Metrics**: Each provider has cost and complexity scores (0-10) for intelligent routing
 - **Priority-Based Selection**: Providers are selected in priority order
 - **Usage Tracking**: Logs token usage daily in JSONL format
-- **Admin Dashboard**: Web UI for monitoring provider status and switching providers
+- **Conversation Audit Log**: Records every prompt, response, thinking block, tool call, tool result and failure — one file per conversation
+- **Admin Dashboard**: Web UI for monitoring provider status, switching providers and replaying conversations
 
 ## Configuration
 
@@ -217,6 +218,10 @@ providerManager.GetProviderForCapability("chat", maxCost: 5, maxComplexity: 8);
 
 ## API Endpoints
 
+> The admin, provider-management and conversation endpoints below are reachable from the
+> loopback interface only; see [Who can reach the operator surface](#who-can-reach-the-operator-surface).
+> The `/v1/*` proxy endpoints are unaffected.
+
 ### Admin Dashboard
 - `GET /admin` - Web UI for provider management
 
@@ -228,10 +233,120 @@ providerManager.GetProviderForCapability("chat", maxCost: 5, maxComplexity: 8);
 ### Usage
 - `GET /admin/api/usage/today` - Get today's token usage statistics
 
+### Conversations
+- `GET /admin/api/conversations` - List conversations with date filter and paging
+- `GET /admin/api/conversations/{id}` - Get one conversation with its full event trail
+
+See [docs/conversations-api.md](docs/conversations-api.md) for the full request and response contract.
+
 ### Proxy
 - `POST /v1/chat/completions` - Forward chat completion requests
 - `POST /v1/completions` - Forward completion requests
 - `POST /v1/embeddings` - Forward embedding requests
+
+## Conversation Audit Log
+
+Every proxied call is recorded so a conversation can be replayed later. The trail is
+plain JSONL — grep it, back it up, ship it elsewhere.
+
+### Storage
+
+| Path | Contents |
+|------|----------|
+| `<logs>/conversations/<conversation-id>.jsonl` | One file per conversation, one event per line |
+| `<logs>/conversations/index.jsonl` | Append-only roll-up that makes listing cheap; delete it and the index is rebuilt from the conversation files |
+
+Event kinds: `request`, `thinking`, `response`, `tool_call`, `tool_result`, `error`.
+The `request` event carries the inbound body with `messages` removed and only the messages
+the log did not hold yet in `data.messages`, so a resent history is not written again every
+turn; the assistant side is decomposed so reasoning and each tool call are individually
+visible. Streaming responses are folded back into one assistant message, so a streamed turn
+looks the same as a buffered one.
+
+### Conversation identity
+
+1. The `X-Conversation-Id` request header is used when the client sends one that matches
+   `[A-Za-z0-9._-]` up to 100 characters. A value outside that shape is ignored, so a
+   client cannot name a conversation it does not own or fold two ids onto one file.
+2. Otherwise the id is derived from the conversation opening — SHA-256 over the first
+   system message plus the first user message — so the multi-turn history an OpenAI client
+   resends each turn keeps landing in the same file.
+3. With neither, the request becomes its own conversation.
+
+Every proxy response carries the resolved id back in `X-Conversation-Id`. A client that
+sent no header cannot know what we derived from its opening messages, so the echo is how it
+can address this same conversation explicitly from the next turn on instead of relying on
+the derivation — which merges conversations that happen to open identically.
+
+Each HTTP turn also gets a fresh request id, which is what groups events inside a file.
+
+### In the admin UI
+
+| Page | URL |
+|------|-----|
+| Conversation list | `/conversations.html` (also `/admin/conversations`) |
+| Conversation replay | `/conversation.html?id=<id>` (also `/admin/conversation/<id>`) |
+
+The list shows one row per conversation with a `from`/`to` date filter and paging; the
+filter and page live in the URL, so a filtered view can be shared or reloaded. The replay
+groups events into turns and renders prompts, thinking, tool calls, tool results,
+responses with token usage, and errors, each with a collapsible raw-JSON view.
+
+### Who can reach the operator surface
+
+The operator surface — `/admin/*`, `/api/providers*` and the three operator pages — is
+restricted to the **loopback interface**. A request whose TCP peer is not `127.0.0.0/8` or
+`::1` gets `403`. The proxied API (`/v1/*`) is unaffected and stays reachable from anywhere.
+
+This is deliberate: since the audit log exists, the admin surface exposes the full text of
+every user prompt, reasoning block and tool result, and the provider API reports provider
+configuration. The proxy has no user authentication of its own, so the peer address is the
+only real boundary available and it is closed by default.
+
+The check is the TCP peer address alone. `X-Forwarded-For` and friends are deliberately
+**not** consulted — a client sets them to whatever it likes, and trusting them would make the
+restriction decorative. If you front the proxy with a reverse proxy and still want remote
+operator access, put a real authentication layer in front of it and then set
+`Admin:RequireLocalhost` to `false`.
+
+```json
+{
+  "Admin": {
+    "RequireLocalhost": true
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Admin:RequireLocalhost` | `true` | Operator surface answers loopback peers only |
+
+### Configuration
+
+```json
+{
+  "Conversations": {
+    "Enabled": true,
+    "Directory": "D:/llm-proxy/conversations",
+    "MaxFieldChars": 100000
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Conversations:Enabled` | `true` | Kill switch — turns the audit log off completely |
+| `Conversations:Directory` | `<logs>/conversations` | Where the files live |
+| `Conversations:MaxFieldChars` | `100000` | Any single string field longer than this is stored truncated |
+
+### Privacy
+
+The log contains user content. The directory is git-ignored and must be protected at the
+filesystem level. API keys are never written: the `Authorization` header is not part of
+the captured payload, a string value named `api_key`, `apikey`, `authorization`, `token`,
+`secret` or `password` anywhere in the body is stored as `[masked]`, and multipart uploads
+are recorded as a field and file summary rather than as binary. Set
+`Conversations:Enabled=false` if you must not retain content.
 
 ## Running
 
@@ -247,6 +362,10 @@ The application will start on `http://localhost:5000` by default.
 |----------|-------------|
 | `ASPNETCORE_URLS` | URLs to bind to (default: `http://localhost:5000`) |
 | `Logging__LogLevel__Default` | Logging level |
+| `Conversations__Enabled` | Set to `false` to disable the conversation audit log |
+| `Conversations__Directory` | Where conversation files are written |
+| `Conversations__MaxFieldChars` | Truncate captured string fields beyond this size |
+| `Admin__RequireLocalhost` | Set to `false` to let remote peers reach the operator surface |
 
 ## License
 

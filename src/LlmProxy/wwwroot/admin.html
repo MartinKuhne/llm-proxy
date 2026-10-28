@@ -36,7 +36,7 @@
     .stat-card .value { font-size: 1.4rem; font-weight: 700; }
     .error-body { max-height: 100px; overflow-y: auto; max-width: 300px; font-size: 0.75rem; background: #fef2f2; padding: 0.25rem; border-radius: 4px; margin-top: 0.25rem; white-space: pre-wrap; word-break: break-all; }
     .nav-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
-    .nav-tab { padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.9rem; }
+    .nav-tab { padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.9rem; color: #374151; text-decoration: none; }
     .nav-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
     .nav-tab:hover:not(.active) { background: #f9fafb; }
     .tab-content { display: none; }
@@ -49,6 +49,7 @@
   <div class="nav-tabs">
     <button class="nav-tab active" onclick="showTab('today', event)">Today</button>
     <button class="nav-tab" onclick="showTab('30days', event)">Last 30 Days</button>
+    <a class="nav-tab" href="/conversations.html" style="margin-left:auto">Conversations</a>
   </div>
 
   <div id="tab-today" class="tab-content active">
