@@ -318,7 +318,7 @@ public class ProxyServiceConversationLoggingTests
             _tokenCountLogger,
             new ProvidersConfig { RetryDelaySeconds = 0 },
             _conversationLogger,
-            new ConversationIdResolver(),
+            new ConversationIdResolver(NullLogger<ConversationIdResolver>.Instance),
             new AuditBodyCapture(NullLogger<AuditBodyCapture>.Instance),
             NullLoggerFactory.Instance);
     }

@@ -31,6 +31,9 @@ public static class ConversationLoggerLoggerExtensions
     private static readonly Action<ILogger, int, Exception?> _conversationIndexLoadFailed =
         LoggerMessage.Define<int>(LogLevel.Error, 107, "Could not load the conversation index; retrying in {RetryAfterSeconds}s");
 
+    private static readonly Action<ILogger, int, Exception?> _conversationIdHeaderRejected =
+        LoggerMessage.Define<int>(LogLevel.Debug, 108, "Ignored {ValueLength}-character conversation id header that is not [A-Za-z0-9._-] up to 100 long; derived one instead");
+
     public static void ConversationWritten(this ILogger logger, string fileName, int eventCount)
         => _conversationWritten(logger, fileName, eventCount, null);
 
@@ -54,4 +57,7 @@ public static class ConversationLoggerLoggerExtensions
 
     public static void ConversationIndexLoadFailed(this ILogger logger, int retryAfterSeconds, Exception exception)
         => _conversationIndexLoadFailed(logger, retryAfterSeconds, exception);
+
+    public static void ConversationIdHeaderRejected(this ILogger logger, int valueLength)
+        => _conversationIdHeaderRejected(logger, valueLength, null);
 }

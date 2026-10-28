@@ -43,7 +43,7 @@ public class ProxyServiceFailoverTests
             _tokenCountLogger,
             new ProvidersConfig(),
             Substitute.For<IConversationLogger>(),
-            new ConversationIdResolver(),
+            new ConversationIdResolver(NullLogger<ConversationIdResolver>.Instance),
             new AuditBodyCapture(NullLogger<AuditBodyCapture>.Instance),
             NullLoggerFactory.Instance);
     }

@@ -63,7 +63,63 @@ public sealed class AuditBodyCapture
             }
         }
 
+        MaskSecrets(audit);
+
         return ToElement(audit);
+    }
+
+    /// <summary>Body field names whose string value is a credential, matched case-insensitively at any depth.</summary>
+    private static readonly string[] _maskedKeys = ["api_key", "apikey", "authorization", "token", "secret", "password"];
+
+    /// <summary>What a masked value is replaced with.</summary>
+    internal const string MaskedMarker = "[masked]";
+
+    /// <summary>
+    /// First-pass mask for credentials a client puts in the request body instead of the header: a body
+    /// <c>api_key</c>, a tool payload carrying a bearer token, anything under a name that says "secret".
+    /// </summary>
+    /// <param name="node">Parsed body to mask in place.</param>
+    /// <remarks>
+    /// Coarse by design. It replaces string values under a known secret name at any depth and nothing else, so it
+    /// stops the obvious leak without pretending to be a redaction engine. Keys are collected before they are
+    /// written back because a <see cref="JsonObject"/> cannot be mutated while it is being enumerated.
+    /// </remarks>
+    private static void MaskSecrets(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                List<string>? masked = null;
+                foreach (var property in obj)
+                {
+                    if (Array.IndexOf(_maskedKeys, property.Key.ToLowerInvariant()) >= 0 &&
+                        property.Value?.GetValueKind() == JsonValueKind.String)
+                    {
+                        (masked ??= []).Add(property.Key);
+                        continue;
+                    }
+
+                    MaskSecrets(property.Value);
+                }
+
+                if (masked is not null)
+                {
+                    foreach (var key in masked)
+                    {
+                        obj[key] = MaskedMarker;
+                    }
+                }
+
+                break;
+
+            case JsonArray array:
+                foreach (var item in array)
+                {
+                    MaskSecrets(item);
+                }
+
+                break;
+        }
     }
 
     /// <summary>Model the client asked for, read from the audit body (multipart requests carry it in the fields).</summary>

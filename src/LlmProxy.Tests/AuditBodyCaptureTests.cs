@@ -16,6 +16,68 @@ public class AuditBodyCaptureTests
 
     private readonly AuditBodyCapture _capture = new(NullLogger<AuditBodyCapture>.Instance);
 
+    [Theory]
+    [InlineData("api_key")]
+    [InlineData("API_KEY")]
+    [InlineData("apikey")]
+    [InlineData("ApiKey")]
+    [InlineData("authorization")]
+    [InlineData("AUTHORIZATION")]
+    [InlineData("token")]
+    [InlineData("Token")]
+    [InlineData("secret")]
+    [InlineData("password")]
+    public async Task CaptureRequestAsync_SecretNamedField_IsMaskedWhateverItsCasing(string key)
+    {
+        var context = Request("application/json", $$"""{"model":"gpt-4","{{key}}":"hunter2","keep":"hunter2"}""");
+
+        var body = await _capture.CaptureRequestAsync(context.Request, CancellationToken.None);
+
+        Assert.Equal("[masked]", body.GetProperty(key).GetString());
+        Assert.Equal("gpt-4", body.GetProperty("model").GetString());
+        Assert.Equal("hunter2", body.GetProperty("keep").GetString());
+    }
+
+    [Fact]
+    public async Task CaptureRequestAsync_SecretNestedDeepInAToolPayload_IsMaskedAtAnyDepth()
+    {
+        var context = Request(
+            "application/json",
+            """
+            {
+              "model": "gpt-4",
+              "tools": [{ "function": { "name": "http", "parameters": { "token": "bearer-abc" } } }],
+              "nested": { "deeper": { "Authorization": "Bearer zzz", "note": "keep me" } }
+            }
+            """);
+
+        var body = await _capture.CaptureRequestAsync(context.Request, CancellationToken.None);
+
+        Assert.Equal("[masked]", body
+            .GetProperty("tools")[0]
+            .GetProperty("function")
+            .GetProperty("parameters")
+            .GetProperty("token")
+            .GetString());
+        Assert.Equal("[masked]", body.GetProperty("nested").GetProperty("deeper").GetProperty("Authorization").GetString());
+        Assert.Equal("keep me", body.GetProperty("nested").GetProperty("deeper").GetProperty("note").GetString());
+    }
+
+    [Fact]
+    public async Task CaptureRequestAsync_OrdinaryBody_IsLeftAlone()
+    {
+        var context = Request(
+            "application/json",
+            """{"model":"gpt-4","messages":[{"role":"user","content":"hello there"}],"temperature":0.2}""");
+
+        var body = await _capture.CaptureRequestAsync(context.Request, CancellationToken.None);
+
+        Assert.DoesNotContain("[masked]", body.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal("gpt-4", body.GetProperty("model").GetString());
+        Assert.Equal("hello there", body.GetProperty("messages")[0].GetProperty("content").GetString());
+        Assert.Equal(0.2, body.GetProperty("temperature").GetDouble());
+    }
+
     [Fact]
     public async Task CaptureRequestAsync_JsonBody_IsStoredAsParsedJson()
     {

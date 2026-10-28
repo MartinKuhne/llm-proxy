@@ -19,7 +19,7 @@ public class ParseUsageFromResponseTests
             tokenCountLogger: Substitute.For<ITokenCountLogger>(),
             providersConfig: new ProvidersConfig(),
             conversationLogger: Substitute.For<IConversationLogger>(),
-            conversationIdResolver: new ConversationIdResolver(),
+            conversationIdResolver: new ConversationIdResolver(new Microsoft.Extensions.Logging.Abstractions.NullLogger<ConversationIdResolver>()),
             auditBodyCapture: new AuditBodyCapture(new Microsoft.Extensions.Logging.Abstractions.NullLogger<AuditBodyCapture>()),
             loggerFactory: Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
     }

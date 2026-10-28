@@ -3,6 +3,8 @@ namespace LlmProxy.Application.Services;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using LlmProxy.Application.Logging;
 
 /// <summary>
 /// Decides which conversation a request belongs to: an explicit client header wins, otherwise the conversation
@@ -20,12 +22,29 @@ public class ConversationIdResolver
     private const int DerivedLength = 16;
     private const char PartSeparator = '\u0000';
 
+    /// <summary>The shape a client-supplied conversation id must have to be honoured.</summary>
+    private static readonly Regex _clientIdPattern = new("^[A-Za-z0-9._-]{1,100}$", RegexOptions.Compiled);
+
+    private readonly ILogger<ConversationIdResolver> _logger;
+
+    public ConversationIdResolver(ILogger<ConversationIdResolver> logger)
+    {
+        _logger = logger;
+    }
+
     /// <summary>
     /// Resolves the conversation id for a request from the <see cref="HeaderName"/> header or the request body.
     /// </summary>
     /// <param name="request">Incoming request.</param>
     /// <param name="requestBody">Parsed request body, when one was available.</param>
     /// <returns>A non-empty conversation id.</returns>
+    /// <remarks>
+    /// A header value is honoured only when it matches <see cref="_clientIdPattern"/>. Taking the client's string
+    /// verbatim would let anyone append events to a conversation they do not own by sending a known or guessed id,
+    /// and would fold two distinct ids onto one file: "a/b", "a\b" and "a_b" all sanitize to "a_b". Path traversal
+    /// is already neutralised by the file naming; what is protected here is identity integrity. A value that does
+    /// not conform is ignored and the request derives its own conversation as if no header had been sent.
+    /// </remarks>
     public string Resolve(HttpRequest request, JsonElement? requestBody)
     {
         if (request.Headers.TryGetValue(HeaderName, out var header))
@@ -33,7 +52,13 @@ public class ConversationIdResolver
             var value = header.ToString().Trim();
             if (value.Length > 0)
             {
-                return value;
+                if (_clientIdPattern.IsMatch(value))
+                {
+                    return value;
+                }
+
+                // The value itself is not logged: it is client content and may carry what it was trying to hide.
+                _logger.ConversationIdHeaderRejected(value.Length);
             }
         }
 

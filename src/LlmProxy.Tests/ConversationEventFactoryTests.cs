@@ -333,6 +333,38 @@ public class ConversationEventFactoryTests
         Assert.Equal(JsonValueKind.Null, data.GetProperty("body").ValueKind);
     }
 
+    /// <summary>
+    /// A cap smaller than the "...[truncated]" suffix used to return the bare suffix, i.e. a stored field longer
+    /// than the cap it was supposed to enforce.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    [InlineData(10)]
+    [InlineData(13)]
+    [InlineData(14)]
+    public void FromResponse_CapSmallerThanTheTruncationSuffix_StillRespectsTheCap(int cap)
+    {
+        var response = CreateResponse($$"""{"reasoning":"{{new string('x', 200)}}","content":"ok"}""");
+
+        var events = ConversationEventFactory.FromResponse(response, cap);
+
+        var thinking = events[0].Data!.Value.GetProperty("content").GetString();
+        Assert.Equal(cap, thinking!.Length);
+    }
+
+    [Fact]
+    public void FromRequest_CapSmallerThanTheTruncationSuffix_StillRespectsTheCap()
+    {
+        const int cap = 10;
+        var request = CreateRequest($$"""{"messages":[{"role":"user","content":"{{new string('y', 200)}}"}]}""");
+
+        var events = ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, cap);
+
+        var content = events[0].Data!.Value.GetProperty("messages")[0].GetProperty("content").GetString();
+        Assert.Equal(cap, content!.Length);
+    }
+
     [Fact]
     public void FromResponse_TruncatesOversizedStringField()
     {

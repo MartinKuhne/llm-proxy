@@ -3,10 +3,73 @@ namespace LlmProxy.Tests;
 using System.Text.Json;
 using LlmProxy.Application.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 
 public class ConversationIdResolverTests
 {
-    private readonly ConversationIdResolver _resolver = new();
+    private readonly ConversationIdResolver _resolver = new(Substitute.For<ILogger<ConversationIdResolver>>());
+
+    [Theory]
+    [InlineData("chat-42")]
+    [InlineData("a")]
+    [InlineData("A_b-9.d")]
+    [InlineData("0123456789")]
+    public void Resolve_ConformingHeader_IsUsedAsGiven(string value)
+    {
+        var body = Json("""{"messages":[{"role":"user","content":"hi"}]}""");
+
+        Assert.Equal(value, _resolver.Resolve(Request(value), body));
+    }
+
+    /// <summary>
+    /// A header the client controls is not a trusted identity. Anything outside the strict shape is ignored, so it
+    /// cannot name a conversation it does not own and cannot be folded onto a file another client holds.
+    /// </summary>
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("..\\..\\evil")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    [InlineData("a b")]
+    [InlineData("a<b>|")]
+    [InlineData("a\tb")]
+    [InlineData("a\u0000b")]
+    [InlineData("a\nb")]
+    [InlineData("ünïcode")]
+    public void Resolve_NonConformingHeader_IsIgnoredAndDerivesItsOwnConversation(string value)
+    {
+        var body = Json("""{"messages":[{"role":"user","content":"hi"}]}""");
+
+        var id = _resolver.Resolve(Request(value), body);
+
+        Assert.Matches("^[0-9a-f]{16}$", id);
+        Assert.Equal(ConversationIdResolver.DeriveFromMessages(body), id);
+    }
+
+    [Fact]
+    public void Resolve_HeaderAtTheLengthLimit_IsUsed_AboveItIsIgnored()
+    {
+        var body = Json("""{"messages":[{"role":"user","content":"hi"}]}""");
+
+        Assert.Equal(new string('k', 100), _resolver.Resolve(Request(new string('k', 100)), body));
+        Assert.Matches("^[0-9a-f]{16}$", _resolver.Resolve(Request(new string('k', 101)), body));
+    }
+
+    [Fact]
+    public void Resolve_IdsThatWouldCollideOnOneFile_DoNotShareAConversation()
+    {
+        var body = Json("""{"messages":[{"role":"user","content":"hi"}]}""");
+
+        // "a/b" and "a_b" sanitize to the same file name, so honouring the former would let one client write into
+        // the other's conversation. The non-conforming value is dropped instead.
+        var traversalish = _resolver.Resolve(Request("a/b"), body);
+        var underscore = _resolver.Resolve(Request("a_b"), body);
+
+        Assert.Equal("a_b", underscore);
+        Assert.Matches("^[0-9a-f]{16}$", traversalish);
+        Assert.NotEqual(traversalish, underscore);
+    }
 
     [Fact]
     public void Resolve_UsesHeaderAndTrimsIt()

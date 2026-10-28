@@ -375,8 +375,11 @@ internal static class ConversationEventFactory
             return value;
         }
 
-        var keep = Math.Max(0, cap - TruncatedSuffix.Length);
-        return string.Concat(value.AsSpan(0, keep), TruncatedSuffix);
+        // The suffix is shortened to fit when the cap is smaller than it is, so the stored field never ends up
+        // longer than the cap it was truncated to enforce.
+        var suffix = TruncatedSuffix.Length <= cap ? TruncatedSuffix : TruncatedSuffix[..cap];
+        var keep = cap - suffix.Length;
+        return string.Concat(value.AsSpan(0, keep), suffix);
     }
 
     private static int Cap(int maxFieldChars) => maxFieldChars > 0 ? maxFieldChars : int.MaxValue;
