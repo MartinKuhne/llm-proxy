@@ -61,6 +61,15 @@ public class ProxyService : IProxyService
         var conversationId = _conversationIdResolver.Resolve(context.Request, auditBody);
         var requestId = Guid.NewGuid().ToString("N");
 
+        // Tell the client which conversation its request landed in. A client that never sent the header cannot know
+        // the id derived from its opening messages, so without this it can only keep guessing and re-deriving;
+        // echoing it lets a cooperating client address its own conversation explicitly from the second turn on
+        // instead of relying on the derivation, which merges conversations that happen to open identically.
+        if (!context.Response.HasStarted)
+        {
+            context.Response.Headers[ConversationIdResolver.HeaderName] = conversationId;
+        }
+
         var bestProvider = GetProviderForRequest(context);
 
         // Record the prompt before any provider is tried so it survives a crash mid-request.

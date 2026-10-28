@@ -108,6 +108,46 @@ public class ProxyServiceConversationLoggingTests
     }
 
     [Fact]
+    public async Task ProxyAsync_EchoesTheConversationIdTheClientGaveUs()
+    {
+        var service = CreateService(_ => Task.FromResult(JsonResponse(CompletionJson("sunny"))));
+        var context = Context(conversationId: "chat-77");
+
+        await service.ProxyAsync(context, "v1/chat/completions");
+
+        Assert.Equal("chat-77", context.Response.Headers[ConversationIdResolver.HeaderName]);
+    }
+
+    [Fact]
+    public async Task ProxyAsync_EchoesTheDerivedConversationId_WhenTheClientSentNone()
+    {
+        var service = CreateService(_ => Task.FromResult(JsonResponse(CompletionJson("sunny"))));
+        var context = Context();
+
+        await service.ProxyAsync(context, "v1/chat/completions");
+
+        // The client cannot know the id we derived from its opening messages, so the echo is the only way it can
+        // address this same conversation explicitly afterwards.
+        var echoed = context.Response.Headers[ConversationIdResolver.HeaderName];
+        Assert.False(string.IsNullOrWhiteSpace(echoed));
+        Assert.Equal(_requests.Single().ConversationId, echoed);
+    }
+
+    [Fact]
+    public async Task ProxyAsync_EchoesTheConversationId_EvenWithNoProviderToCall()
+    {
+        _providerManager.GetBestProvider().Returns((ProviderConfig?)null);
+        _providerManager.GetAllProviders().Returns(Array.Empty<ProviderConfig>());
+        var service = CreateService(_ => Task.FromResult(JsonResponse(CompletionJson("never"))));
+        var context = Context(conversationId: "chat-77");
+
+        await service.ProxyAsync(context, "v1/chat/completions");
+
+        Assert.Equal(503, context.Response.StatusCode);
+        Assert.Equal("chat-77", context.Response.Headers[ConversationIdResolver.HeaderName]);
+    }
+
+    [Fact]
     public async Task ProxyAsync_NonStreamingSuccess_LogsAssistantContentUsageAndStreamedFalse()
     {
         var service = CreateService(_ => Task.FromResult(JsonResponse(
