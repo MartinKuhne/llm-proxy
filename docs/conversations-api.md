@@ -161,5 +161,13 @@ carries the whole upstream body as `data.raw` instead of `data.content`.
 
 - Content is user data. The endpoints sit under the admin surface; the log directory is
   git-ignored and must be protected at the filesystem level (ADR-004).
+- **Access.** The admin surface answers loopback peers only. A request whose TCP peer is not
+  `127.0.0.0/8` or `::1` gets `403` before it reaches these handlers. Forwarded-for headers
+  are not consulted, because a client controls them. Set `Admin:RequireLocalhost=false` to
+  open it to remote peers, which only makes sense behind something that authenticates them.
+- **Conversation echo.** Every `/v1/*` proxy response carries the resolved conversation id
+  in the `X-Conversation-Id` header, including on `502`/`503`. A client that sent no header
+  learns the id derived from its opening messages and can address that conversation
+  explicitly from the next turn on.
 - Fields longer than `Conversations:MaxFieldChars` arrive already truncated with a
   trailing `...[truncated]` marker.

@@ -93,9 +93,12 @@ turn, so nothing in a single request says "this is turn 7 of the same chat".
   system prompt plus the same first user message — derive the same id and land in the
   same conversation file, where their turns interleave. This is not confined to the
   rejected "hash only" alternative above: it applies to every request that reaches the
-  derived path, i.e. every client that does not send `X-Conversation-Id`. A per-client
-  discriminator in the seed would separate them; that change is still pending a decision
-  on the deployment posture (see the backlog).
+  derived path, i.e. every client that does not send `X-Conversation-Id`.
+- That merge is mitigated rather than eliminated: every proxy response echoes the resolved
+  id in `X-Conversation-Id`, so a client that can set headers stops relying on the
+  derivation after the first turn. A per-client discriminator in the seed (API-key or
+  principal hash) would separate non-cooperating clients too, but an unstable discriminator
+  splits one conversation across files, so it is left in the backlog rather than guessed at.
 - A client-supplied `X-Conversation-Id` is accepted only when it matches
   `[A-Za-z0-9._-]` up to 100 characters. Anything else is ignored and the request
   derives its own id, so a client cannot name a conversation it does not own and cannot
@@ -120,6 +123,18 @@ shares one prefix, one auth story and one OpenAPI grouping.
 A top-level `/api/conversations` is cleaner in isolation but would split the admin surface
 into two conventions for no functional gain today.
 
+### Consequences
+
+- Placing the read API on the admin surface means it inherits that surface's access control,
+  which is what makes the exposure of full conversation content defensible. The proxy has no
+  user authentication of its own, so the admin surface is closed to non-loopback peers by
+  default (`Admin:RequireLocalhost`, ADR-005). Had the conversations API sat on a public
+  prefix instead, adding it would have meant shipping every user prompt, reasoning block and
+  tool result on an unauthenticated endpoint.
+- The one-auth-story claim is now real rather than aspirational: `/admin/*`, `/api/providers*`
+  and the operator pages are gated by the same middleware, so there is a single place to
+  change when real authentication arrives.
+
 ---
 
 ## ADR-004 — Full content is recorded by default, with a kill switch
@@ -132,7 +147,9 @@ into two conventions for no functional gain today.
 Full prompt, response, thinking and tool payloads are recorded by default; that is the
 point of the audit log. `Conversations.Enabled = false` turns recording off completely,
 and `Conversations.MaxFieldChars` bounds individual fields. API keys are never written:
-the `Authorization` header is not part of the captured payload.
+the `Authorization` header is not part of the captured payload, and a string value named
+`api_key`, `apikey`, `authorization`, `token`, `secret` or `password` anywhere in the
+captured body is replaced with `[masked]`.
 
 ### Consequences
 
@@ -140,3 +157,49 @@ the `Authorization` header is not part of the captured payload.
   level; it is git-ignored and documented as sensitive.
 - Operators in regulated environments must set `Conversations.Enabled=false` or point
   `Conversations:Directory` at appropriately protected storage.
+- The body mask is name-based, not content-based. A secret written into prose, or stored
+  under a key outside the recognised list, is recorded as-is. Treat the log directory as
+  holding cleartext secrets regardless.
+
+---
+
+## ADR-005 — The operator surface is loopback-only by default
+
+**Date:** 2026-10-28
+**Status:** Accepted
+
+### Context
+
+Adding the conversation audit log changed what sits behind the admin surface. Before it,
+`/admin/*` exposed provider configuration and aggregate token counters. After it, the same
+prefix serves the full text of every user prompt, every chain-of-thought block and every
+tool result. The proxy has no inbound authentication at all — its `ApiKey` values are
+outbound provider credentials — so there was no existing user model to hang an
+`[Authorize]` check on.
+
+### Decision
+
+`AdminAccessMiddleware` refuses any request to the operator surface whose TCP peer address
+is not loopback. The surface is `/admin/*`, `/api/providers*` and the three operator pages
+(`/admin.html`, `/conversations.html`, `/conversation.html`). The proxied `/v1/*` API is
+not gated. `Admin:RequireLocalhost` (default `true`) turns the restriction off.
+
+### Alternatives considered
+
+- **Full authentication** — the right long-term answer, but it needs a user model this proxy
+  does not have and is a much larger change than the audit log itself.
+- **Default `Conversations:Enabled=false` outside Development** — protects the content but
+  quietly disables the feature for anyone running the binary without `ASPNETCORE_ENVIRONMENT`
+  set, which is the normal way to run it.
+- **Gate on `X-Forwarded-For`** — rejected outright. The client controls that header, so
+  trusting it makes the restriction decorative.
+
+### Consequences
+
+- Remote operator access is gone unless deliberately re-enabled. Anyone fronting the proxy
+  with a reverse proxy for operator use must put real authentication in front of it first,
+  then set `Admin:RequireLocalhost=false`.
+- The gate is a network boundary, not an identity check. Anything running on the same machine
+  as the proxy can read every conversation.
+- Adding real authentication later means replacing one middleware, and the operator surface
+  already has a single place to hang it from.

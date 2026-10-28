@@ -218,6 +218,10 @@ providerManager.GetProviderForCapability("chat", maxCost: 5, maxComplexity: 8);
 
 ## API Endpoints
 
+> The admin, provider-management and conversation endpoints below are reachable from the
+> loopback interface only; see [Who can reach the operator surface](#who-can-reach-the-operator-surface).
+> The `/v1/*` proxy endpoints are unaffected.
+
 ### Admin Dashboard
 - `GET /admin` - Web UI for provider management
 
@@ -269,6 +273,11 @@ looks the same as a buffered one.
    resends each turn keeps landing in the same file.
 3. With neither, the request becomes its own conversation.
 
+Every proxy response carries the resolved id back in `X-Conversation-Id`. A client that
+sent no header cannot know what we derived from its opening messages, so the echo is how it
+can address this same conversation explicitly from the next turn on instead of relying on
+the derivation — which merges conversations that happen to open identically.
+
 Each HTTP turn also gets a fresh request id, which is what groups events inside a file.
 
 ### In the admin UI
@@ -282,6 +291,35 @@ The list shows one row per conversation with a `from`/`to` date filter and pagin
 filter and page live in the URL, so a filtered view can be shared or reloaded. The replay
 groups events into turns and renders prompts, thinking, tool calls, tool results,
 responses with token usage, and errors, each with a collapsible raw-JSON view.
+
+### Who can reach the operator surface
+
+The operator surface — `/admin/*`, `/api/providers*` and the three operator pages — is
+restricted to the **loopback interface**. A request whose TCP peer is not `127.0.0.0/8` or
+`::1` gets `403`. The proxied API (`/v1/*`) is unaffected and stays reachable from anywhere.
+
+This is deliberate: since the audit log exists, the admin surface exposes the full text of
+every user prompt, reasoning block and tool result, and the provider API reports provider
+configuration. The proxy has no user authentication of its own, so the peer address is the
+only real boundary available and it is closed by default.
+
+The check is the TCP peer address alone. `X-Forwarded-For` and friends are deliberately
+**not** consulted — a client sets them to whatever it likes, and trusting them would make the
+restriction decorative. If you front the proxy with a reverse proxy and still want remote
+operator access, put a real authentication layer in front of it and then set
+`Admin:RequireLocalhost` to `false`.
+
+```json
+{
+  "Admin": {
+    "RequireLocalhost": true
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Admin:RequireLocalhost` | `true` | Operator surface answers loopback peers only |
 
 ### Configuration
 
@@ -327,6 +365,7 @@ The application will start on `http://localhost:5000` by default.
 | `Conversations__Enabled` | Set to `false` to disable the conversation audit log |
 | `Conversations__Directory` | Where conversation files are written |
 | `Conversations__MaxFieldChars` | Truncate captured string fields beyond this size |
+| `Admin__RequireLocalhost` | Set to `false` to let remote peers reach the operator surface |
 
 ## License
 

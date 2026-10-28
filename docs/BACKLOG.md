@@ -34,20 +34,26 @@
 - [ ] Compact `index.jsonl`. It takes one line per recorded turn-phase and is never
       rewritten, so it outgrows the conversations it describes over time.
 - [ ] Retention policy, e.g. `Conversations:RetentionDays`, with a startup sweep.
-- [ ] Return the resolved `X-Conversation-Id` on the proxy response so a client that did
+- [x] Return the resolved `X-Conversation-Id` on the proxy response so a client that did
       not send one can still correlate its later turns with the recorded conversation.
 - [ ] Redact known-secret *shapes* (API keys, bearer tokens) inside prompt and tool payload
       content. The first pass masks by field name only; a secret embedded in prose or under an
       unrecognised key still gets through.
 
-### Open, pending a decision
+### Resolved by review
 
-- [ ] **H5** Unauthenticated `/admin/*` read surface: the conversation list and replay
-      endpoints expose every recorded prompt and response to anyone who can reach the port.
-      Blocked on a decision about the deployment posture before changing
-      `Conversations:Enabled` defaults or adding auth middleware.
-- [ ] **H4** Mix a per-client discriminator into the derived conversation id, so two clients
-      with an identical opening stop landing in one file. Blocked on the same decision as H5.
+- [x] **H5** Unauthenticated `/admin/*` read surface. The operator surface is now refused
+      for any non-loopback TCP peer (`AdminAccessMiddleware`, `Admin:RequireLocalhost`,
+      ADR-005). Real authentication is still the better long-term answer and remains open as
+      a general project concern, not an audit-log one.
+- [x] **H4** Two clients with an identical opening landing in one file. Mitigated by echoing
+      the resolved id on every response, so cooperating clients stop depending on the
+      derivation. A per-client discriminator in the seed is deliberately *not* done: an
+      unstable discriminator splits one conversation across files, which is worse than the
+      merge it avoids.
+- [x] **H1** Recorded-message boundary derived from the event instead of accumulated.
+- [x] **H2** Per-conversation atomic write; concurrent turns can no longer duplicate content.
+- [x] **H3** Client-supplied conversation id validated rather than trusted verbatim.
 
 ### Open, known limitations
 
@@ -55,7 +61,7 @@
       to an earlier message with an unchanged tail is silently not recorded.
 - [ ] **M2** Aggregate payload budget: `MaxFieldChars` bounds each string leaf, not the total
       size of a node, so many medium fields can still add up to a very large event.
-- [ ] **M7** Unbounded `StringBuilder` growth in `SseAssistantAssembler` â€” a long-lived or
+- [ ] **M7** Unbounded `StringBuilder` growth in `SseAssistantAssembler` — a long-lived or
       hostile stream can grow it without a ceiling.
 - [ ] **L2** Serialisation churn: request bodies are parsed, re-serialised and re-parsed
       between capture, factory and writer.
