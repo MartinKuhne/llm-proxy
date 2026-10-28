@@ -81,6 +81,10 @@ Full replay of one conversation.
 
 `404` when the conversation id is unknown or its file is missing.
 
+> Timestamps are serialised by System.Text.Json with an explicit offset (`+00:00`) rather
+> than the `Z` literal used in the examples above. Same instant, valid ISO-8601, and
+> `new Date(...)` in the browser parses either.
+
 ## Rendering rules for the detail view
 
 - Events arrive in file order, which is chronological per conversation; group them by

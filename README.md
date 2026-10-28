@@ -267,6 +267,18 @@ into one assistant message, so a streamed turn looks the same as a buffered one.
 
 Each HTTP turn also gets a fresh request id, which is what groups events inside a file.
 
+### In the admin UI
+
+| Page | URL |
+|------|-----|
+| Conversation list | `/conversations.html` (also `/admin/conversations`) |
+| Conversation replay | `/conversation.html?id=<id>` (also `/admin/conversation/<id>`) |
+
+The list shows one row per conversation with a `from`/`to` date filter and paging; the
+filter and page live in the URL, so a filtered view can be shared or reloaded. The replay
+groups events into turns and renders prompts, thinking, tool calls, tool results,
+responses with token usage, and errors, each with a collapsible raw-JSON view.
+
 ### Configuration
 
 ```json
