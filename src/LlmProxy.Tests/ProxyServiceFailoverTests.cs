@@ -7,6 +7,7 @@ using LlmProxy.Application.Services;
 using LlmProxy.Domain;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
 public class ProxyServiceFailoverTests
@@ -35,7 +36,15 @@ public class ProxyServiceFailoverTests
         var httpClient = new HttpClient(handler);
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
         httpClientFactory.CreateClient().Returns(httpClient);
-        return new ProxyService(_logger, _providerManager, httpClientFactory, _tokenCountLogger, new ProvidersConfig());
+        return new ProxyService(
+            _logger,
+            _providerManager,
+            httpClientFactory,
+            _tokenCountLogger,
+            new ProvidersConfig(),
+            Substitute.For<IConversationLogger>(),
+            new ConversationIdResolver(),
+            NullLoggerFactory.Instance);
     }
 
     private static DefaultHttpContext CreateContext(string body)

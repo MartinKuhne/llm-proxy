@@ -61,6 +61,7 @@ if (!string.IsNullOrWhiteSpace(conversationOptions.Directory))
 
 builder.Services.AddSingleton(conversationOptions);
 builder.Services.AddSingleton<ConversationIndex>();
+builder.Services.AddSingleton<ConversationIdResolver>();
 builder.Services.AddScoped<IConversationLogger, FileConversationLogger>();
 
 builder.Services.AddScoped<ITokenCountLogger, FileTokenCountLogger>();

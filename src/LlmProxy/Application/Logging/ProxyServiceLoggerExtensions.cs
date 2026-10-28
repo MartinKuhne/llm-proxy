@@ -36,6 +36,18 @@ public static class ProxyServiceLoggerExtensions
     private static readonly Action<ILogger, string, int, Exception?> _proxyRetryAfter =
         LoggerMessage.Define<string, int>(LogLevel.Information, 19, "Provider {BaseUrl} requested {RetryAfterSeconds}s delay before retry");
 
+    private static readonly Action<ILogger, string, Exception?> _proxyAuditBodyUnavailable =
+        LoggerMessage.Define<string>(LogLevel.Debug, 20, "Could not capture the full request body for the audit log: {Reason}");
+
+    private static readonly Action<ILogger, int, Exception?> _proxyAuditBodyTruncated =
+        LoggerMessage.Define<int>(LogLevel.Debug, 21, "Audit copy of the request body truncated at {ByteLimit} bytes");
+
+    public static void ProxyAuditBodyUnavailable(this ILogger logger, string reason, Exception? exception = null)
+        => _proxyAuditBodyUnavailable(logger, reason, exception);
+
+    public static void ProxyAuditBodyTruncated(this ILogger logger, int byteLimit)
+        => _proxyAuditBodyTruncated(logger, byteLimit, null);
+
     public static void ProxyRetryAfter(this ILogger logger, string baseUrl, int retryAfterSeconds)
         => _proxyRetryAfter(logger, baseUrl, retryAfterSeconds, null);
 

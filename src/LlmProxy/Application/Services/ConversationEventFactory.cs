@@ -124,6 +124,12 @@ internal static class ConversationEventFactory
             data["usage"] = ToNode(usage, cap);
         }
 
+        // Non-chat endpoints (embeddings and friends) have no assistant message; keep their body as raw JSON.
+        if (!hasAssistant && response.RawResponse is { } raw && raw.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            data["raw"] = ToNode(raw, cap);
+        }
+
         events.Add(Create(ConversationEventKind.Response, data));
 
         return events;

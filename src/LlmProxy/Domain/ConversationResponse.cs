@@ -17,6 +17,10 @@ using System.Text.Json;
 /// </param>
 /// <param name="Usage">OpenAI usage object, when the upstream returned one.</param>
 /// <param name="Streamed">True when the response was streamed to the client.</param>
+/// <param name="RawResponse">
+/// Whole response body for endpoints that have no assistant message (embeddings and other non-chat responses),
+/// recorded so the answer is not lost.
+/// </param>
 public sealed record ConversationResponse(
     string ConversationId,
     string RequestId,
@@ -26,4 +30,5 @@ public sealed record ConversationResponse(
     string? Path,
     JsonElement? AssistantMessage,
     JsonElement? Usage,
-    bool Streamed);
+    bool Streamed,
+    JsonElement? RawResponse = null);
