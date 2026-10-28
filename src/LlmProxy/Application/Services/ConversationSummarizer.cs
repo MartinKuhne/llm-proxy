@@ -78,6 +78,15 @@ internal static class ConversationSummarizer
     /// tell what is already stored. Fields the event does not carry leave the summary untouched: an omitted tools
     /// array means "still the one already stored", not "none".
     /// </summary>
+    /// <remarks>
+    /// <see cref="ConversationSummary.RecordedMessageCount"/> is the boundary of the client's CURRENT history that
+    /// is stored, not a tally of everything ever written. A request event reports both halves of that boundary —
+    /// <c>recordedCount</c> it skipped to and <c>newMessageCount</c> it added — so the fold sets
+    /// <c>recordedCount + newMessageCount</c> rather than accumulating. Deriving the boundary from the event is
+    /// what keeps an edited, regenerated or branched history self-correcting: accumulating would overshoot it, the
+    /// <c>RecordedMessageCount &gt; total</c> guard in <c>ConversationEventFactory.SkipCount</c> would then trip
+    /// forever, and every later turn would re-store the whole conversation.
+    /// </remarks>
     private static void FoldRecordedState(ConversationSummary summary, ConversationEvent evt)
     {
         if (evt.Data is not { } data || data.ValueKind != JsonValueKind.Object)
@@ -86,9 +95,18 @@ internal static class ConversationSummarizer
         }
 
         if (data.TryGetProperty("newMessageCount", out var newMessageCount) &&
-            newMessageCount.TryGetInt32(out var added) && added > 0)
+            newMessageCount.TryGetInt32(out var added))
         {
-            summary.RecordedMessageCount += added;
+            if (data.TryGetProperty("recordedCount", out var recordedCount) &&
+                recordedCount.TryGetInt32(out var skipped) && skipped >= 0)
+            {
+                summary.RecordedMessageCount = Math.Max(0, skipped + added);
+            }
+            else if (added > 0)
+            {
+                // Legacy events report only what they added and no boundary; accumulate for those.
+                summary.RecordedMessageCount += added;
+            }
         }
 
         if (TryGetString(data, "lastMessageFingerprint", out var lastFingerprint))

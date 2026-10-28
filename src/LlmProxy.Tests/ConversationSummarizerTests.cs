@@ -27,7 +27,38 @@ public class ConversationSummarizerTests
     }
 
     [Fact]
-    public void Fold_RequestEvents_AccumulateTheRecordedMessageCount()
+    public void Fold_RequestEvents_SetTheBoundaryTheEventReports()
+    {
+        var summary = new ConversationSummary { Id = "conv-1" };
+
+        ConversationSummarizer.Fold(summary, Request("""{"recordedCount":0,"newMessageCount":2,"lastMessageFingerprint":"one"}"""));
+        ConversationSummarizer.Fold(summary, Request("""{"recordedCount":2,"newMessageCount":3,"lastMessageFingerprint":"two"}"""));
+
+        // The recorded count is the boundary of the client's current history that is stored, so it is the
+        // recordedCount the event skipped to plus the newMessageCount it wrote — never a tally of turns.
+        Assert.Equal(5, summary.RecordedMessageCount);
+        Assert.Equal("two", summary.LastRecordedMessageFingerprint);
+    }
+
+    [Fact]
+    public void Fold_BranchedRequestEvent_SelfCorrectsTheBoundary()
+    {
+        var summary = new ConversationSummary { Id = "conv-1" };
+
+        ConversationSummarizer.Fold(summary, Request("""{"recordedCount":0,"newMessageCount":4,"lastMessageFingerprint":"one"}"""));
+        ConversationSummarizer.Fold(summary, Request("""{"recordedCount":4,"newMessageCount":2,"lastMessageFingerprint":"two"}"""));
+        Assert.Equal(6, summary.RecordedMessageCount);
+
+        // The client edited or branched: this turn skipped back to 0 and re-stored 3 messages. The boundary
+        // follows the client's history down instead of overshooting it, which is what keeps later turns small.
+        ConversationSummarizer.Fold(summary, Request("""{"recordedCount":0,"newMessageCount":3,"lastMessageFingerprint":"three"}"""));
+
+        Assert.Equal(3, summary.RecordedMessageCount);
+        Assert.Equal("three", summary.LastRecordedMessageFingerprint);
+    }
+
+    [Fact]
+    public void Fold_LegacyRequestEventsWithoutABoundary_AccumulateWhatTheyAdded()
     {
         var summary = new ConversationSummary { Id = "conv-1" };
 

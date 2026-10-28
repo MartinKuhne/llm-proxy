@@ -252,6 +252,135 @@ public class FileConversationLoggerTests : IDisposable
         Assert.Equal(live.RecordedToolsFingerprint, summary.RecordedToolsFingerprint);
     }
 
+    /// <summary>
+    /// The branch case: a client that edits, regenerates or branches resends a history that is not strictly longer
+    /// than what is stored. The branch turn re-stores the history it diverged from — the one duplication the
+    /// design accepts so a rewritten history never loses content — and every turn after it goes back to storing
+    /// only its own new messages.
+    /// </summary>
+    [Fact]
+    public async Task BranchedHistory_KeepsStoringOnlyTheNewSliceAfterTheBranch()
+    {
+        var logger = CreateLogger();
+
+        const string system = """{"role":"system","content":"You are a terse assistant."}""";
+        const string user1 = """{"role":"user","content":"What is the weather in Berlin?"}""";
+        const string assistant1 = """{"role":"assistant","content":"Calling the weather tool."}""";
+        const string user2 = """{"role":"user","content":"And tomorrow?"}""";
+        const string user3 = """{"role":"user","content":"And the day after?"}""";
+        const string assistant2 = """{"role":"assistant","content":"Rain expected."}""";
+        const string user4 = """{"role":"user","content":"Any wind?"}""";
+
+        var history = new List<string> { system, user1 };
+        await logger.LogRequestAsync(ChatRequest("alpha", 1, history, Tools), CancellationToken.None);
+        AssertRecordedWithinHistory("alpha", history);
+
+        history.Add(assistant1);
+        history.Add(user2);
+        await logger.LogRequestAsync(ChatRequest("alpha", 2, history, Tools), CancellationToken.None);
+        AssertRecordedWithinHistory("alpha", history);
+
+        // Branch: the client drops its last turn and regenerates, so the resent history is shorter than the
+        // stored one. Everything it holds is now the recorded boundary.
+        history = [system, user1, assistant1];
+        await logger.LogRequestAsync(ChatRequest("alpha", 3, history, Tools), CancellationToken.None);
+        AssertRecordedWithinHistory("alpha", history);
+
+        history.Add(user3);
+        await logger.LogRequestAsync(ChatRequest("alpha", 4, history, Tools), CancellationToken.None);
+        AssertRecordedWithinHistory("alpha", history);
+
+        history.Add(assistant2);
+        history.Add(user4);
+        await logger.LogRequestAsync(ChatRequest("alpha", 5, history, Tools), CancellationToken.None);
+        AssertRecordedWithinHistory("alpha", history);
+
+        var events = await ReadEventsAsync(Path.Combine(_directory, "alpha.jsonl"));
+        var slices = StoredSliceByTurn(events);
+
+        // The per-turn slice stays small after the branch: 1 and 2 messages, not the whole history every turn.
+        Assert.Equal(2, slices["req-1"]);
+        Assert.Equal(2, slices["req-2"]);
+        Assert.Equal(3, slices["req-3"]);
+        Assert.Equal(1, slices["req-4"]);
+        Assert.Equal(2, slices["req-5"]);
+
+        var stored = events
+            .Where(evt => evt.Kind == ConversationEventKind.Request)
+            .SelectMany(evt => evt.Data!.Value.GetProperty("messages").EnumerateArray())
+            .Select(message => message.GetRawText())
+            .ToList();
+
+        // Nothing is dropped: all seven distinct messages are on disk.
+        Assert.Equal(7, stored.Distinct(StringComparer.Ordinal).Count());
+
+        // and written exactly once, except the single re-store the branch turn owes for the prefix it diverged from.
+        Assert.Equal(10, stored.Count);
+        Assert.Equal(1, stored.Count(text => text.Contains("And tomorrow?", StringComparison.Ordinal)));
+        Assert.Equal(1, stored.Count(text => text.Contains("And the day after?", StringComparison.Ordinal)));
+        Assert.Equal(1, stored.Count(text => text.Contains("Rain expected.", StringComparison.Ordinal)));
+        Assert.Equal(1, stored.Count(text => text.Contains("Any wind?", StringComparison.Ordinal)));
+        Assert.All(stored, text => Assert.True(
+            stored.Count(other => other == text) <= 2,
+            $"\"{text}\" was stored more than the branch re-store allows"));
+    }
+
+    [Fact]
+    public async Task RebuiltIndex_ReproducesTheLiveDedupeStateAfterABranch()
+    {
+        var logger = CreateLogger();
+
+        const string system = """{"role":"system","content":"You are a terse assistant."}""";
+        const string user1 = """{"role":"user","content":"What is the weather in Berlin?"}""";
+        const string assistant1 = """{"role":"assistant","content":"Calling the weather tool."}""";
+
+        var history = new List<string> { system, user1 };
+        await logger.LogRequestAsync(ChatRequest("alpha", 1, history, Tools), CancellationToken.None);
+
+        history.Add(assistant1);
+        history.Add("""{"role":"user","content":"And tomorrow?"}""");
+        await logger.LogRequestAsync(ChatRequest("alpha", 2, history, Tools), CancellationToken.None);
+
+        history = [system, user1, assistant1];
+        await logger.LogRequestAsync(ChatRequest("alpha", 3, history, Tools), CancellationToken.None);
+
+        history.Add("""{"role":"user","content":"And the day after?"}""");
+        await logger.LogRequestAsync(ChatRequest("alpha", 4, history, Tools), CancellationToken.None);
+
+        var live = Assert.Single(_index.All());
+        Assert.Equal(4, live.RecordedMessageCount);
+
+        var rebuilt = new ConversationIndex(Substitute.For<ILogger<ConversationIndex>>());
+        await rebuilt.RebuildAsync(CancellationToken.None);
+
+        var summary = Assert.Single(rebuilt.All());
+        Assert.Equal(live.RecordedMessageCount, summary.RecordedMessageCount);
+        Assert.Equal(live.LastRecordedMessageFingerprint, summary.LastRecordedMessageFingerprint);
+        Assert.Equal(live.RecordedToolsFingerprint, summary.RecordedToolsFingerprint);
+    }
+
+    /// <summary>Number of messages each request turn stored, keyed by request id.</summary>
+    private static Dictionary<string, int> StoredSliceByTurn(IEnumerable<ConversationEvent> events) =>
+        events
+            .Where(evt => evt.Kind == ConversationEventKind.Request)
+            .ToDictionary(
+                evt => evt.RequestId,
+                evt => evt.Data!.Value.GetProperty("messages").GetArrayLength());
+
+    /// <summary>
+    /// The recorded boundary must never run ahead of the client's own history: once it does, the
+    /// <c>RecordedMessageCount &gt; total</c> guard in the event factory trips and the conversation re-stores
+    /// itself in full on every later turn.
+    /// </summary>
+    private void AssertRecordedWithinHistory(string conversationId, IReadOnlyList<string> history)
+    {
+        Assert.True(_index.TryGetSummary(conversationId, out var summary));
+        Assert.NotNull(summary);
+        Assert.True(
+            summary.RecordedMessageCount <= history.Count,
+            $"Recorded {summary.RecordedMessageCount} messages against a history of {history.Count}");
+    }
+
     private FileConversationLogger CreateLogger(ConversationOptions? options = null) =>
         new(Substitute.For<ILogger<FileConversationLogger>>(), _index, options ?? new ConversationOptions { Directory = _directory });
 
