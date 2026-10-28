@@ -9,7 +9,8 @@ A smart LLM proxy that automatically routes requests to the best available provi
 - **Cost & Complexity Metrics**: Each provider has cost and complexity scores (0-10) for intelligent routing
 - **Priority-Based Selection**: Providers are selected in priority order
 - **Usage Tracking**: Logs token usage daily in JSONL format
-- **Admin Dashboard**: Web UI for monitoring provider status and switching providers
+- **Conversation Audit Log**: Records every prompt, response, thinking block, tool call, tool result and failure — one file per conversation
+- **Admin Dashboard**: Web UI for monitoring provider status, switching providers and replaying conversations
 
 ## Configuration
 
@@ -228,10 +229,68 @@ providerManager.GetProviderForCapability("chat", maxCost: 5, maxComplexity: 8);
 ### Usage
 - `GET /admin/api/usage/today` - Get today's token usage statistics
 
+### Conversations
+- `GET /admin/api/conversations` - List conversations with date filter and paging
+- `GET /admin/api/conversations/{id}` - Get one conversation with its full event trail
+
+See [docs/conversations-api.md](docs/conversations-api.md) for the full request and response contract.
+
 ### Proxy
 - `POST /v1/chat/completions` - Forward chat completion requests
 - `POST /v1/completions` - Forward completion requests
 - `POST /v1/embeddings` - Forward embedding requests
+
+## Conversation Audit Log
+
+Every proxied call is recorded so a conversation can be replayed later. The trail is
+plain JSONL — grep it, back it up, ship it elsewhere.
+
+### Storage
+
+| Path | Contents |
+|------|----------|
+| `<logs>/conversations/<conversation-id>.jsonl` | One file per conversation, one event per line |
+| `<logs>/conversations/index.jsonl` | Append-only roll-up that makes listing cheap; delete it and the index is rebuilt from the conversation files |
+
+Event kinds: `request`, `thinking`, `response`, `tool_call`, `tool_result`, `error`.
+The `request` event carries the whole inbound body; the assistant side is decomposed so
+reasoning and each tool call are individually visible. Streaming responses are folded back
+into one assistant message, so a streamed turn looks the same as a buffered one.
+
+### Conversation identity
+
+1. The `X-Conversation-Id` request header is used verbatim when the client sends one.
+2. Otherwise the id is derived from the conversation opening — SHA-256 over the first
+   system message plus the first user message — so the multi-turn history an OpenAI client
+   resends each turn keeps landing in the same file.
+3. With neither, the request becomes its own conversation.
+
+Each HTTP turn also gets a fresh request id, which is what groups events inside a file.
+
+### Configuration
+
+```json
+{
+  "Conversations": {
+    "Enabled": true,
+    "Directory": "D:/llm-proxy/conversations",
+    "MaxFieldChars": 100000
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Conversations:Enabled` | `true` | Kill switch — turns the audit log off completely |
+| `Conversations:Directory` | `<logs>/conversations` | Where the files live |
+| `Conversations:MaxFieldChars` | `100000` | Any single string field longer than this is stored truncated |
+
+### Privacy
+
+The log contains user content. The directory is git-ignored and must be protected at the
+filesystem level. API keys are never written: the `Authorization` header is not part of
+the captured payload, and multipart uploads are recorded as a field and file summary
+rather than as binary. Set `Conversations:Enabled=false` if you must not retain content.
 
 ## Running
 
@@ -247,6 +306,9 @@ The application will start on `http://localhost:5000` by default.
 |----------|-------------|
 | `ASPNETCORE_URLS` | URLs to bind to (default: `http://localhost:5000`) |
 | `Logging__LogLevel__Default` | Logging level |
+| `Conversations__Enabled` | Set to `false` to disable the conversation audit log |
+| `Conversations__Directory` | Where conversation files are written |
+| `Conversations__MaxFieldChars` | Truncate captured string fields beyond this size |
 
 ## License
 
