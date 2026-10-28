@@ -19,6 +19,7 @@ public class ConversationReaderListTests : IDisposable
 
     private readonly string _directory;
     private readonly ConversationIndex _index;
+    private readonly ConversationLocks _locks;
     private readonly FileConversationReader _reader;
 
     public ConversationReaderListTests()
@@ -26,6 +27,7 @@ public class ConversationReaderListTests : IDisposable
         _directory = Path.Combine(Path.GetTempPath(), "llm-proxy-conversation-reader-list", Guid.NewGuid().ToString("N"));
         AppPaths.ConversationDirectory = _directory;
         _index = new ConversationIndex(Substitute.For<ILogger<ConversationIndex>>());
+        _locks = new ConversationLocks();
         _reader = new FileConversationReader(Substitute.For<ILogger<FileConversationReader>>(), _index);
     }
 
@@ -238,7 +240,11 @@ public class ConversationReaderListTests : IDisposable
     private static IEnumerable<string> Ids(ConversationPage page) => page.Items.Select(item => item.Id);
 
     private FileConversationLogger CreateLogger() =>
-        new(Substitute.For<ILogger<FileConversationLogger>>(), _index, new ConversationOptions { Directory = _directory });
+        new(
+            Substitute.For<ILogger<FileConversationLogger>>(),
+            _index,
+            _locks,
+            new ConversationOptions { Directory = _directory });
 
     private async Task SeedAsync(
         string id,

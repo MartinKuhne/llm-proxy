@@ -61,6 +61,7 @@ if (!string.IsNullOrWhiteSpace(conversationOptions.Directory))
 
 builder.Services.AddSingleton(conversationOptions);
 builder.Services.AddSingleton<ConversationIndex>();
+builder.Services.AddSingleton<ConversationLocks>();
 builder.Services.AddSingleton<ConversationIdResolver>();
 builder.Services.AddSingleton<AuditBodyCapture>();
 builder.Services.AddScoped<IConversationLogger, FileConversationLogger>();

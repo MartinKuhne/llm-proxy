@@ -13,12 +13,14 @@ public class FileConversationLoggerTests : IDisposable
 {
     private readonly string _directory;
     private readonly ConversationIndex _index;
+    private readonly ConversationLocks _locks;
 
     public FileConversationLoggerTests()
     {
         _directory = Path.Combine(Path.GetTempPath(), "llm-proxy-conversation-logger", Guid.NewGuid().ToString("N"));
         AppPaths.ConversationDirectory = _directory;
         _index = new ConversationIndex(Substitute.For<ILogger<ConversationIndex>>());
+        _locks = new ConversationLocks();
     }
 
     public void Dispose()
@@ -359,6 +361,74 @@ public class FileConversationLoggerTests : IDisposable
         Assert.Equal(live.RecordedToolsFingerprint, summary.RecordedToolsFingerprint);
     }
 
+    /// <summary>
+    /// The H2 case: parallel tool-call turns, a client retrying while the first request is still in flight, or two
+    /// tabs sharing a conversation id all reach the logger at the same moment. Read outside the write lock they see
+    /// the same recorded state, compute the same fresh slice and write it twice.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentRequestsOnOneConversation_StoreEveryMessageOnce()
+    {
+        var logger = CreateLogger();
+
+        var history = new List<string>
+        {
+            """{"role":"system","content":"You are a terse assistant."}""",
+            """{"role":"user","content":"What is the weather in Berlin?"}""",
+        };
+
+        var turns = Enumerable.Range(1, 8)
+            .Select(turn => logger.LogRequestAsync(ChatRequest("alpha", turn, history, Tools), CancellationToken.None))
+            .ToList();
+
+        await Task.WhenAll(turns);
+
+        var text = await File.ReadAllTextAsync(Path.Combine(_directory, "alpha.jsonl"), CancellationToken.None);
+
+        Assert.Equal(1, Count(text, "What is the weather in Berlin?"));
+        Assert.Equal(1, Count(text, "You are a terse assistant."));
+
+        var summary = Assert.Single(_index.All());
+        Assert.Equal(2, summary.RecordedMessageCount);
+    }
+
+    [Fact]
+    public async Task InterleavedRequestAndResponseWrites_AllLandWithoutDuplicatingContent()
+    {
+        var logger = CreateLogger();
+
+        var history = new List<string>
+        {
+            """{"role":"system","content":"You are a terse assistant."}""",
+            """{"role":"user","content":"What is the weather in Berlin?"}""",
+        };
+
+        var writes = new List<Task>();
+        for (var turn = 1; turn <= 6; turn++)
+        {
+            writes.Add(logger.LogRequestAsync(ChatRequest("alpha", turn, history, Tools), CancellationToken.None));
+            writes.Add(logger.LogResponseAsync(Response("alpha", "thinking", "answer"), CancellationToken.None));
+        }
+
+        await Task.WhenAll(writes);
+
+        var path = Path.Combine(_directory, "alpha.jsonl");
+        var events = await ReadEventsAsync(path);
+        var text = await File.ReadAllTextAsync(path, CancellationToken.None);
+
+        // Nothing is lost: every request event plus thinking and response for each of the six responses.
+        Assert.Equal(18, events.Count);
+        Assert.Equal(6, events.Count(evt => evt.Kind == ConversationEventKind.Request));
+        Assert.Equal(6, events.Count(evt => evt.Kind == ConversationEventKind.Response));
+
+        // and nothing is written twice.
+        Assert.Equal(1, Count(text, "What is the weather in Berlin?"));
+        Assert.Equal(1, Count(text, "You are a terse assistant."));
+
+        var summary = Assert.Single(_index.All());
+        Assert.Equal(2, summary.RecordedMessageCount);
+    }
+
     /// <summary>Number of messages each request turn stored, keyed by request id.</summary>
     private static Dictionary<string, int> StoredSliceByTurn(IEnumerable<ConversationEvent> events) =>
         events
@@ -382,7 +452,11 @@ public class FileConversationLoggerTests : IDisposable
     }
 
     private FileConversationLogger CreateLogger(ConversationOptions? options = null) =>
-        new(Substitute.For<ILogger<FileConversationLogger>>(), _index, options ?? new ConversationOptions { Directory = _directory });
+        new(
+            Substitute.For<ILogger<FileConversationLogger>>(),
+            _index,
+            _locks,
+            options ?? new ConversationOptions { Directory = _directory });
 
     private const string Tools = """[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object"}}}]""";
 

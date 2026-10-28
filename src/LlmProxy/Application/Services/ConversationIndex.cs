@@ -109,11 +109,21 @@ public sealed class ConversationIndex
     /// <summary>Appends the summary as one JSON line to <c>index.jsonl</c>; the last write wins on reload.</summary>
     /// <param name="summary">Summary to persist.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
+    /// <remarks>
+    /// The line is serialised under the same <c>lock</c> every mutation takes, so the index never sees a half-folded
+    /// summary. Callers hold the conversation's lock across the fold and this write, which keeps the append order
+    /// of <c>index.jsonl</c> in step with the fold order the last-write-wins reload depends on.
+    /// </remarks>
     public async Task PersistAsync(ConversationSummary summary, CancellationToken cancellationToken = default)
     {
+        string line;
+        lock (summary)
+        {
+            line = JsonSerializer.Serialize(summary, _writeOptions);
+        }
+
         var directory = AppPaths.ConversationDirectory;
         var indexPath = Path.Combine(directory, IndexFileName);
-        var line = JsonSerializer.Serialize(summary, _writeOptions);
 
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

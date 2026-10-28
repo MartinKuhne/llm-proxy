@@ -18,6 +18,7 @@ public class ConversationReaderGetTests : IDisposable
 
     private readonly string _directory;
     private readonly ConversationIndex _index;
+    private readonly ConversationLocks _locks;
     private readonly FileConversationReader _reader;
 
     public ConversationReaderGetTests()
@@ -25,6 +26,7 @@ public class ConversationReaderGetTests : IDisposable
         _directory = Path.Combine(Path.GetTempPath(), "llm-proxy-conversation-reader-get", Guid.NewGuid().ToString("N"));
         AppPaths.ConversationDirectory = _directory;
         _index = new ConversationIndex(Substitute.For<ILogger<ConversationIndex>>());
+        _locks = new ConversationLocks();
         _reader = new FileConversationReader(Substitute.For<ILogger<FileConversationReader>>(), _index);
     }
 
@@ -199,7 +201,11 @@ public class ConversationReaderGetTests : IDisposable
     }
 
     private FileConversationLogger CreateLogger() =>
-        new(Substitute.For<ILogger<FileConversationLogger>>(), _index, new ConversationOptions { Directory = _directory });
+        new(
+            Substitute.For<ILogger<FileConversationLogger>>(),
+            _index,
+            _locks,
+            new ConversationOptions { Directory = _directory });
 
     private void WriteConversationFile(string fileName, IEnumerable<string> lines)
     {
