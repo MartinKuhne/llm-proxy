@@ -16,11 +16,23 @@ internal static class ConversationEventFactory
     internal const string TruncatedSuffix = "...[truncated]";
 
     /// <summary>
-    /// Builds the request event plus one tool-result event for every <c>role=tool</c> message in the request body.
+    /// Builds the request event plus one tool-result event for every <c>role=tool</c> message the client added
+    /// since the previous turn.
     /// </summary>
     /// <param name="request">The incoming request.</param>
+    /// <param name="dedupe">What this conversation already has stored, so resent content is not written twice.</param>
     /// <param name="maxFieldChars">Largest size kept for any single string field.</param>
-    public static IReadOnlyList<ConversationEvent> FromRequest(ConversationRequest request, int maxFieldChars)
+    /// <remarks>
+    /// Clients resend the whole history every turn. Only the messages the log does not hold yet are stored, in the
+    /// event's own <c>messages</c> field; the stored <c>body</c> keeps the remaining request fields with the
+    /// resent <c>messages</c> and an unchanged <c>tools</c> array removed, so nothing is written twice. When the
+    /// stored history does not line up with the resent one — a rewritten or branched conversation — the whole history
+    /// is stored instead, so nothing is ever silently dropped.
+    /// </remarks>
+    public static IReadOnlyList<ConversationEvent> FromRequest(
+        ConversationRequest request,
+        RequestDedupeContext dedupe,
+        int maxFieldChars)
     {
         var cap = Cap(maxFieldChars);
 
@@ -30,38 +42,48 @@ internal static class ConversationEventFactory
 
         var events = new List<ConversationEvent>();
         var messages = TryGetArray(request.Body, "messages");
+        var skip = SkipCount(messages, dedupe);
+        var fresh = NewMessages(messages, skip);
+        var toolsFingerprint = JsonFingerprint.Of(TryGetArray(request.Body, "tools") ?? default);
+        var toolsAlreadyStored = toolsFingerprint is not null && toolsFingerprint == dedupe.RecordedToolsFingerprint;
 
-        events.Add(Create(ConversationEventKind.Request, new JsonObject
+        var data = new JsonObject
         {
-            ["body"] = ToNode(request.Body, cap),
+            ["body"] = BuildBody(request.Body, hasMessages: messages is not null, toolsAlreadyStored, cap),
+            ["messages"] = ToArrayNode(fresh, cap),
             ["messageCount"] = messages?.GetArrayLength() ?? 0,
-        }));
+            ["recordedCount"] = skip,
+            ["newMessageCount"] = fresh.Count,
+            ["lastMessageFingerprint"] = fresh.Count > 0 ? JsonFingerprint.Of(fresh[^1]) : null,
+        };
 
-        if (messages is null)
+        if (toolsFingerprint is not null && !toolsAlreadyStored)
         {
-            return events;
+            data["toolsFingerprint"] = toolsFingerprint;
         }
 
-        foreach (var message in messages.Value.EnumerateArray())
+        events.Add(Create(ConversationEventKind.Request, data));
+
+        foreach (var message in fresh)
         {
             if (message.ValueKind != JsonValueKind.Object || TryGetString(message, "role") != "tool")
             {
                 continue;
             }
 
-            var data = new JsonObject
+            var toolResult = new JsonObject
             {
                 ["toolCallId"] = TryGetString(message, "tool_call_id"),
             };
 
             if (message.TryGetProperty("name", out var name))
             {
-                data["name"] = ToNode(name, cap);
+                toolResult["name"] = ToNode(name, cap);
             }
 
-            data["content"] = message.TryGetProperty("content", out var content) ? ToNode(content, cap) : null;
+            toolResult["content"] = message.TryGetProperty("content", out var content) ? ToNode(content, cap) : null;
 
-            events.Add(Create(ConversationEventKind.ToolResult, data));
+            events.Add(Create(ConversationEventKind.ToolResult, toolResult));
         }
 
         return events;
@@ -156,6 +178,102 @@ internal static class ConversationEventFactory
                 ConversationEventKind.Error, failure.Timestamp, failure.ConversationId, failure.RequestId,
                 failure.Provider, failure.Model, failure.Path, ToElement(data))
         ];
+    }
+
+    /// <summary>
+    /// Number of leading request messages already on disk: the recorded count when the message stored at that index
+    /// still matches its fingerprint, zero whenever the client rewrote or branched its history.
+    /// </summary>
+    private static int SkipCount(JsonElement? messages, RequestDedupeContext dedupe)
+    {
+        if (messages is null || dedupe.RecordedMessageCount <= 0 || dedupe.LastRecordedMessageFingerprint is null)
+        {
+            return 0;
+        }
+
+        var total = messages.Value.GetArrayLength();
+        if (dedupe.RecordedMessageCount > total)
+        {
+            return 0;
+        }
+
+        var anchor = JsonFingerprint.Of(messages.Value[dedupe.RecordedMessageCount - 1]);
+
+        return anchor is not null && anchor == dedupe.LastRecordedMessageFingerprint ? dedupe.RecordedMessageCount : 0;
+    }
+
+    private static IReadOnlyList<JsonElement> NewMessages(JsonElement? messages, int skip)
+    {
+        if (messages is null)
+        {
+            return [];
+        }
+
+        var fresh = new List<JsonElement>();
+        var index = 0;
+        foreach (var message in messages.Value.EnumerateArray())
+        {
+            if (index++ >= skip)
+            {
+                fresh.Add(message);
+            }
+        }
+
+        return fresh;
+    }
+
+    /// <summary>
+    /// Copy of the request body with the resent <c>messages</c> and already-recorded <c>tools</c> removed; every
+    /// other request field is kept as it arrived. The messages themselves live in the event's own
+    /// <c>messages</c> field, so storing them here too would write the same content twice.
+    /// </summary>
+    private static JsonNode? BuildBody(JsonElement body, bool hasMessages, bool omitTools, int cap)
+    {
+        if (body.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        var raw = body.GetRawText();
+        var node = Parse(raw);
+
+        if (node is JsonObject obj)
+        {
+            if (hasMessages)
+            {
+                obj.Remove("messages");
+            }
+
+            if (omitTools)
+            {
+                obj.Remove("tools");
+            }
+        }
+
+        return raw.Length > cap ? TruncateNode(node, cap) : node;
+    }
+
+    private static JsonArray ToArrayNode(IReadOnlyList<JsonElement> elements, int cap)
+    {
+        var array = new JsonArray();
+        foreach (var element in elements)
+        {
+            array.Add(ToNode(element, cap));
+        }
+
+        return array;
+    }
+
+    private static JsonNode? Parse(string raw)
+    {
+        try
+        {
+            return JsonNode.Parse(raw);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<JsonElement> EnumerateToolCalls(JsonElement message)

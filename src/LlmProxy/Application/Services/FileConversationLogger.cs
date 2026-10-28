@@ -42,27 +42,31 @@ public class FileConversationLogger : IConversationLogger
     /// <inheritdoc />
     public Task LogRequestAsync(ConversationRequest request, CancellationToken cancellationToken = default)
         => WriteAsync(
-            () => ConversationEventFactory.FromRequest(request, _options.MaxFieldChars),
+            summary => ConversationEventFactory.FromRequest(request, DedupeContext(summary), _options.MaxFieldChars),
             request.ConversationId,
+            request.Timestamp,
             cancellationToken);
 
     /// <inheritdoc />
     public Task LogResponseAsync(ConversationResponse response, CancellationToken cancellationToken = default)
         => WriteAsync(
-            () => ConversationEventFactory.FromResponse(response, _options.MaxFieldChars),
+            _ => ConversationEventFactory.FromResponse(response, _options.MaxFieldChars),
             response.ConversationId,
+            response.Timestamp,
             cancellationToken);
 
     /// <inheritdoc />
     public Task LogFailureAsync(ConversationFailure failure, CancellationToken cancellationToken = default)
         => WriteAsync(
-            () => ConversationEventFactory.FromFailure(failure, _options.MaxFieldChars),
+            _ => ConversationEventFactory.FromFailure(failure, _options.MaxFieldChars),
             failure.ConversationId,
+            failure.Timestamp,
             cancellationToken);
 
     private async Task WriteAsync(
-        Func<IReadOnlyList<ConversationEvent>> buildEvents,
+        Func<ConversationSummary, IReadOnlyList<ConversationEvent>> buildEvents,
         string conversationId,
+        DateTimeOffset timestamp,
         CancellationToken cancellationToken)
     {
         if (!_options.Enabled)
@@ -74,7 +78,11 @@ public class FileConversationLogger : IConversationLogger
         {
             await _index.EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
 
-            var events = buildEvents();
+            // The summary is read before anything is written: the request factory needs to know what this
+            // conversation already holds so a resent history is not stored a second time.
+            var summary = await _index.TouchAsync(conversationId, timestamp, cancellationToken).ConfigureAwait(false);
+
+            var events = buildEvents(summary);
             if (events.Count == 0)
             {
                 return;
@@ -99,7 +107,6 @@ public class FileConversationLogger : IConversationLogger
                 await _index.RecordEventAsync(evt, cancellationToken).ConfigureAwait(false);
             }
 
-            var summary = await _index.TouchAsync(conversationId, events[^1].Timestamp, cancellationToken).ConfigureAwait(false);
             await _index.PersistAsync(summary, cancellationToken).ConfigureAwait(false);
 
             _logger.ConversationWritten(fileName, events.Count);
@@ -109,4 +116,7 @@ public class FileConversationLogger : IConversationLogger
             _logger.ConversationLoggingFailed(conversationId, ex);
         }
     }
+
+    private static RequestDedupeContext DedupeContext(ConversationSummary summary) =>
+        new(summary.RecordedMessageCount, summary.LastRecordedMessageFingerprint, summary.RecordedToolsFingerprint);
 }

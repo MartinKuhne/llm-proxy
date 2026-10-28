@@ -32,6 +32,15 @@ public class ConversationSummary
     /// <summary>Total tokens reported by upstream usage objects.</summary>
     public long TotalTokens { get; set; }
 
+    /// <summary>How many request messages are already stored for this conversation.</summary>
+    public int RecordedMessageCount { get; set; }
+
+    /// <summary>Fingerprint of the last request message stored for this conversation, null when none is stored.</summary>
+    public string? LastRecordedMessageFingerprint { get; set; }
+
+    /// <summary>Fingerprint of the tools array currently stored for this conversation, null when none is stored.</summary>
+    public string? RecordedToolsFingerprint { get; set; }
+
     /// <summary>True when at least one error event was recorded.</summary>
     public bool HasErrors { get; set; }
 }

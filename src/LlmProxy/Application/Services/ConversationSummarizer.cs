@@ -48,6 +48,7 @@ internal static class ConversationSummarizer
         if (evt.Kind == ConversationEventKind.Request)
         {
             summary.TurnCount++;
+            FoldRecordedState(summary, evt);
             if (string.IsNullOrEmpty(summary.Title))
             {
                 summary.Title = TitleFrom(evt);
@@ -72,6 +73,47 @@ internal static class ConversationSummarizer
         summary.TotalTokens += TotalTokensFrom(evt);
     }
 
+    /// <summary>
+    /// Carries the dedupe state a request event reports into the summary, so the next turn of the conversation can
+    /// tell what is already stored. Fields the event does not carry leave the summary untouched: an omitted tools
+    /// array means "still the one already stored", not "none".
+    /// </summary>
+    private static void FoldRecordedState(ConversationSummary summary, ConversationEvent evt)
+    {
+        if (evt.Data is not { } data || data.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        if (data.TryGetProperty("newMessageCount", out var newMessageCount) &&
+            newMessageCount.TryGetInt32(out var added) && added > 0)
+        {
+            summary.RecordedMessageCount += added;
+        }
+
+        if (TryGetString(data, "lastMessageFingerprint", out var lastFingerprint))
+        {
+            summary.LastRecordedMessageFingerprint = lastFingerprint;
+        }
+
+        if (TryGetString(data, "toolsFingerprint", out var toolsFingerprint))
+        {
+            summary.RecordedToolsFingerprint = toolsFingerprint;
+        }
+    }
+
+    private static bool TryGetString(JsonElement element, string propertyName, out string? value)
+    {
+        if (element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String)
+        {
+            value = property.GetString();
+            return value is not null;
+        }
+
+        value = null;
+        return false;
+    }
+
     private static long TotalTokensFrom(ConversationEvent evt)
     {
         if (evt.Kind != ConversationEventKind.Response || evt.Data is not { } data)
@@ -89,12 +131,22 @@ internal static class ConversationSummarizer
 
     private static string? TitleFrom(ConversationEvent evt)
     {
-        if (evt.Data is not { } data || !TryGetObject(data, "body", out var body))
+        if (evt.Data is not { } data)
         {
             return null;
         }
 
-        if (!TryGetObjectArray(body, "messages", out var messages))
+        // Current events carry the new messages at the top level; older events kept them inside the body.
+        JsonElement messages;
+        if (TryGetObjectArray(data, "messages", out var top))
+        {
+            messages = top;
+        }
+        else if (TryGetObject(data, "body", out var body) && TryGetObjectArray(body, "messages", out var nested))
+        {
+            messages = nested;
+        }
+        else
         {
             return null;
         }

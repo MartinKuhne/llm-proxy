@@ -13,7 +13,7 @@ public class ConversationEventFactoryTests
     {
         var request = CreateRequest("""{"model":"gpt-test","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}""");
 
-        var events = ConversationEventFactory.FromRequest(request, 1000);
+        var events = ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, 1000);
 
         var evt = Assert.Single(events);
         Assert.Equal(ConversationEventKind.Request, evt.Kind);
@@ -40,7 +40,7 @@ public class ConversationEventFactoryTests
             ]}
             """);
 
-        var events = ConversationEventFactory.FromRequest(request, 1000);
+        var events = ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, 1000);
 
         Assert.Equal(3, events.Count);
         Assert.Equal(ConversationEventKind.Request, events[0].Kind);
@@ -63,10 +63,168 @@ public class ConversationEventFactoryTests
     {
         var request = CreateRequest("""{"model":"gpt-test"}""");
 
-        var events = ConversationEventFactory.FromRequest(request, 1000);
+        var events = ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, 1000);
 
         var evt = Assert.Single(events);
         Assert.Equal(0, evt.Data!.Value.GetProperty("messageCount").GetInt32());
+    }
+
+    [Fact]
+    public void FromRequest_NothingRecordedYet_StoresEveryMessageOfTheRequest()
+    {
+        var request = CreateRequest("""{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}""");
+
+        var data = Assert.Single(ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, 1000)).Data!.Value;
+
+        Assert.Equal(2, data.GetProperty("messageCount").GetInt32());
+        Assert.Equal(0, data.GetProperty("recordedCount").GetInt32());
+        Assert.Equal(2, data.GetProperty("newMessageCount").GetInt32());
+        Assert.Equal(2, data.GetProperty("messages").GetArrayLength());
+        Assert.Equal("hi", data.GetProperty("messages")[0].GetProperty("content").GetString());
+        Assert.Matches("^[0-9a-f]{16}$", data.GetProperty("lastMessageFingerprint").GetString()!);
+        Assert.False(data.TryGetProperty("toolsFingerprint", out _));
+    }
+
+    [Fact]
+    public void FromRequest_ResentHistory_StoresOnlyTheMessagesThatAreNew()
+    {
+        var first = CreateRequest("""{"model":"gpt-test","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"}]}""");
+        var firstData = Assert.Single(ConversationEventFactory.FromRequest(first, RequestDedupeContext.Empty, 1000)).Data!.Value;
+
+        var resent = CreateRequest(
+            """
+            {"model":"gpt-test","messages":[
+              {"role":"user","content":"one"},
+              {"role":"assistant","content":"two"},
+              {"role":"user","content":"three"}
+            ]}
+            """);
+
+        var context = new RequestDedupeContext(2, firstData.GetProperty("lastMessageFingerprint").GetString(), null);
+        var data = Assert.Single(ConversationEventFactory.FromRequest(resent, context, 1000)).Data!.Value;
+
+        Assert.Equal(3, data.GetProperty("messageCount").GetInt32());
+        Assert.Equal(2, data.GetProperty("recordedCount").GetInt32());
+        Assert.Equal(1, data.GetProperty("newMessageCount").GetInt32());
+
+        var stored = data.GetProperty("messages");
+        Assert.Equal(1, stored.GetArrayLength());
+        Assert.Equal("three", stored[0].GetProperty("content").GetString());
+
+        // The body keeps every other request field but no longer repeats the messages, which live in data.messages.
+        var body = data.GetProperty("body");
+        Assert.Equal("gpt-test", body.GetProperty("model").GetString());
+        Assert.False(body.TryGetProperty("messages", out _));
+    }
+
+    [Fact]
+    public void FromRequest_EmitsToolResultsOnlyForMessagesThatAreNew()
+    {
+        var first = CreateRequest(
+            """
+            {"messages":[
+              {"role":"user","content":"weather?"},
+              {"role":"tool","tool_call_id":"call_1","name":"get_weather","content":"sunny"}
+            ]}
+            """);
+
+        var firstEvents = ConversationEventFactory.FromRequest(first, RequestDedupeContext.Empty, 1000);
+        var recorded = firstEvents[0].Data!.Value.GetProperty("lastMessageFingerprint").GetString();
+        Assert.Single(firstEvents, evt => evt.Kind == ConversationEventKind.ToolResult);
+
+        var resent = CreateRequest(
+            """
+            {"messages":[
+              {"role":"user","content":"weather?"},
+              {"role":"tool","tool_call_id":"call_1","name":"get_weather","content":"sunny"},
+              {"role":"assistant","content":"It is sunny."},
+              {"role":"user","content":"and tomorrow?"},
+              {"role":"tool","tool_call_id":"call_2","name":"get_weather","content":"rain"}
+            ]}
+            """);
+
+        var events = ConversationEventFactory.FromRequest(resent, new RequestDedupeContext(2, recorded, null), 1000);
+
+        var toolResult = Assert.Single(events, evt => evt.Kind == ConversationEventKind.ToolResult);
+        Assert.Equal("call_2", toolResult.Data!.Value.GetProperty("toolCallId").GetString());
+        Assert.Equal("rain", toolResult.Data!.Value.GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public void FromRequest_RewrittenHistory_StoresEverythingRatherThanDropMessages()
+    {
+        var request = CreateRequest(
+            """
+            {"messages":[
+              {"role":"user","content":"one"},
+              {"role":"assistant","content":"two, edited by the client"},
+              {"role":"user","content":"three"}
+            ]}
+            """);
+
+        var data = Assert.Single(
+            ConversationEventFactory.FromRequest(request, new RequestDedupeContext(2, "0000000000000000", null), 1000)).Data!.Value;
+
+        Assert.Equal(3, data.GetProperty("messageCount").GetInt32());
+        Assert.Equal(0, data.GetProperty("recordedCount").GetInt32());
+        Assert.Equal(3, data.GetProperty("newMessageCount").GetInt32());
+        Assert.Equal(3, data.GetProperty("messages").GetArrayLength());
+    }
+
+    [Fact]
+    public void FromRequest_RecordedCountLargerThanTheResentHistory_StoresEverything()
+    {
+        var request = CreateRequest("""{"messages":[{"role":"user","content":"one"}]}""");
+
+        var data = Assert.Single(
+            ConversationEventFactory.FromRequest(request, new RequestDedupeContext(5, "0000000000000000", null), 1000)).Data!.Value;
+
+        Assert.Equal(0, data.GetProperty("recordedCount").GetInt32());
+        Assert.Equal(1, data.GetProperty("newMessageCount").GetInt32());
+    }
+
+    [Fact]
+    public void FromRequest_UnchangedTools_AreOmittedAndCarryNoFingerprint()
+    {
+        const string Body =
+            """
+            {"model":"gpt-test",
+             "tools":[{"type":"function","function":{"name":"get_weather","arguments":{"type":"object"}}}],
+             "messages":[{"role":"user","content":"hi"}]}
+            """;
+
+        var first = Assert.Single(ConversationEventFactory.FromRequest(CreateRequest(Body), RequestDedupeContext.Empty, 1000)).Data!.Value;
+        var toolsFingerprint = first.GetProperty("toolsFingerprint").GetString();
+        Assert.Equal(1, first.GetProperty("body").GetProperty("tools").GetArrayLength());
+
+        var context = new RequestDedupeContext(1, first.GetProperty("lastMessageFingerprint").GetString(), toolsFingerprint);
+        var second = Assert.Single(ConversationEventFactory.FromRequest(CreateRequest(Body), context, 1000)).Data!.Value;
+
+        Assert.False(second.TryGetProperty("toolsFingerprint", out _));
+        Assert.False(second.GetProperty("body").TryGetProperty("tools", out _));
+        Assert.Equal("gpt-test", second.GetProperty("body").GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public void FromRequest_ChangedTools_AreStoredWithANewFingerprint()
+    {
+        var first = Assert.Single(
+            ConversationEventFactory.FromRequest(
+                CreateRequest("""{"tools":[{"type":"function","function":{"name":"get_weather"}}],"messages":[{"role":"user","content":"hi"}]}"""),
+                RequestDedupeContext.Empty,
+                1000)).Data!.Value;
+
+        var context = new RequestDedupeContext(1, first.GetProperty("lastMessageFingerprint").GetString(), first.GetProperty("toolsFingerprint").GetString());
+        var second = Assert.Single(
+            ConversationEventFactory.FromRequest(
+                CreateRequest("""{"tools":[{"type":"function","function":{"name":"get_time"}}],"messages":[{"role":"user","content":"hi"}]}"""),
+                context,
+                1000)).Data!.Value;
+
+        Assert.NotEqual(first.GetProperty("toolsFingerprint").GetString(), second.GetProperty("toolsFingerprint").GetString());
+        Assert.Equal(
+            "get_time",
+            second.GetProperty("body").GetProperty("tools")[0].GetProperty("function").GetProperty("name").GetString());
     }
 
     [Fact]
@@ -194,11 +352,13 @@ public class ConversationEventFactoryTests
         const int cap = 32;
         var request = CreateRequest($$"""{"messages":[{"role":"user","content":"{{new string('y', 200)}}"}]}""");
 
-        var events = ConversationEventFactory.FromRequest(request, cap);
+        var events = ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, cap);
 
-        var content = events[0].Data!.Value.GetProperty("body").GetProperty("messages")[0].GetProperty("content").GetString();
+        var data = events[0].Data!.Value;
+        var content = data.GetProperty("messages")[0].GetProperty("content").GetString();
         Assert.Equal(cap, content!.Length);
         Assert.EndsWith(ConversationEventFactory.TruncatedSuffix, content, StringComparison.Ordinal);
+        Assert.False(data.GetProperty("body").TryGetProperty("messages", out _));
     }
 
     [Fact]
@@ -206,7 +366,7 @@ public class ConversationEventFactoryTests
     {
         var request = CreateRequest("""["not","an","object"]""");
 
-        var events = ConversationEventFactory.FromRequest(request, 1000);
+        var events = ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, 1000);
 
         var evt = Assert.Single(events);
         Assert.Equal(ConversationEventKind.Request, evt.Kind);
@@ -218,7 +378,7 @@ public class ConversationEventFactoryTests
     {
         var request = CreateRequest("""{"messages":["a string",{"content":"no role"},{"role":"tool","tool_call_id":42,"content":"x"}]}""");
 
-        var events = ConversationEventFactory.FromRequest(request, 1000);
+        var events = ConversationEventFactory.FromRequest(request, RequestDedupeContext.Empty, 1000);
 
         var toolResult = Assert.Single(events, e => e.Kind == ConversationEventKind.ToolResult);
         Assert.Equal(JsonValueKind.Null, toolResult.Data!.Value.GetProperty("toolCallId").ValueKind);

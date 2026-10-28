@@ -120,10 +120,12 @@
     /**
      * Messages of a resent prompt that were not rendered in an earlier turn.
      *
-     * Clients resend the whole history every turn, so each message is keyed by its canonical JSON and counted.
-     * A message is new only when this turn contains it more often than the conversation has already rendered it,
-     * which keeps repeated identical messages visible and re-sent ones hidden. `role=tool` messages are never
-     * rendered here because the log carries them as dedicated `tool_result` events.
+     * Safety net for log files written before the writer started storing only the new messages: current events
+     * carry the new slice already and never reach this function. Clients resend the whole history every turn, so
+     * each message is keyed by its canonical JSON and counted. A message is new only when this turn contains it
+     * more often than the conversation has already rendered it, which keeps repeated identical messages visible
+     * and re-sent ones hidden. `role=tool` messages are never rendered here because the log carries them as
+     * dedicated `tool_result` events.
      */
     function freshMessages(messages, seen) {
       const counts = new Map();
@@ -229,22 +231,46 @@
         '<span class="usage-chip">' + esc(label) + ' <strong>' + fmt(value) + '</strong></span>').join('') + '</div>';
     }
 
-    function renderRequest(data, seen) {
-      const messages = data.body && Array.isArray(data.body.messages) ? data.body.messages : null;
+    /**
+     * Renders the prompt messages of a turn. `role=tool` messages are left out because the log carries them as
+     * dedicated `tool_result` events right next to them.
+     */
+    function requestBlock(newCount, sentCount, messages) {
+      const visible = messages.filter(message => {
+        const role = message && typeof message === 'object' ? message.role : null;
+        return role !== 'tool';
+      });
 
-      if (!messages) {
+      const head = '<div><span class="kind">request</span>' +
+        '<span class="muted">' + fmt(newCount) + ' new message(s) · ' + fmt(sentCount) + ' sent</span></div>';
+
+      if (visible.length > 0) {
+        return head + '<div class="messages">' + visible.map(messageHtml).join('') + '</div>';
+      }
+
+      return head + '<p class="muted">' + (newCount > 0
+        ? 'Nothing new to show here: the new messages are tool results, shown as their own events below.'
+        : 'No new messages: the client resent the history already shown above.') + '</p>';
+    }
+
+    function renderRequest(data, seen) {
+      // Current events store only the messages the log did not hold yet, so they are rendered as they arrive.
+      if (Array.isArray(data.messages)) {
+        const sent = typeof data.messageCount === 'number' ? data.messageCount : data.messages.length;
+        const added = typeof data.newMessageCount === 'number' ? data.newMessageCount : data.messages.length;
+        return requestBlock(added, sent, data.messages);
+      }
+
+      // Pre-fix events carried the whole resent history: fall back to hiding what an earlier turn already showed.
+      const history = data.body && Array.isArray(data.body.messages) ? data.body.messages : null;
+
+      if (!history) {
         return '<div class="kind">request</div>' +
           '<p class="muted">This request body holds no chat messages (multipart upload or raw text) — see the raw payload below.</p>';
       }
 
-      const fresh = freshMessages(messages, seen);
-      let html = '<div><span class="kind">request</span>' +
-        '<span class="muted">' + fmt(fresh.length) + ' new message(s) · ' + fmt(messages.length) + ' sent</span></div>';
-
-      if (fresh.length === 0) {
-        return html + '<p class="muted">No new messages: the client resent the history already shown above.</p>';
-      }
-      return html + '<div class="messages">' + fresh.map(messageHtml).join('') + '</div>';
+      const fresh = freshMessages(history, seen);
+      return requestBlock(fresh.length, history.length, fresh);
     }
 
     function renderThinking(data) {
