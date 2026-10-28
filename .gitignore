@@ -44,13 +44,13 @@ sql/
 *.sln.docstates
 
 # Conversation audit logs (contain user content - never commit)
-logs/conversations/
 conversations/
 
-# Runtime Serilog output, rolling daily as logs/llm-proxy<yyyyMMdd>.log. The *.NUnit.log and
-# msbuild.log rules above do not match these, so a smoke run would otherwise get committed.
-# (The pre-existing, already-tracked logs/llm-proxy-20260608.log is unaffected.)
-src/LlmProxy/logs/*.log
+# Runtime Serilog output, rolling daily as llm-proxy<yyyyMMdd>.log, and the conversation
+# audit directory that sits beside it. Ignored by directory rather than by extension so a
+# log is caught wherever it lands - the *.NUnit.log and msbuild.log rules above match
+# neither of these, and the audit directory is configurable so it is not always under logs/.
+logs/
 
 # Mac
 .DS_Store
