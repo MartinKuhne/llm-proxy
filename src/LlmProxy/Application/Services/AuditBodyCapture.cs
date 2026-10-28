@@ -221,6 +221,11 @@ public sealed class AuditBodyCapture
         return audit;
     }
 
+    /// <summary>
+    /// First assistant message of a buffered chat completion, with the choice-level <c>finish_reason</c> folded into
+    /// it so the reader only ever looks at one place: OpenAI reports the finish reason on the choice, not inside the
+    /// message the way the streamed assembler writes it.
+    /// </summary>
     private static JsonElement? FirstAssistantMessage(JsonElement body)
     {
         if (body.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array)
@@ -230,12 +235,34 @@ public sealed class AuditBodyCapture
                 if (choice.ValueKind == JsonValueKind.Object &&
                     choice.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object)
                 {
-                    return message.Clone();
+                    return WithChoiceFinishReason(message, choice);
                 }
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Copies <c>finish_reason</c> from the choice into a clone of the assistant message, leaving a message that
+    /// already carries its own finish reason untouched.
+    /// </summary>
+    private static JsonElement WithChoiceFinishReason(JsonElement message, JsonElement choice)
+    {
+        if (JsonNode.Parse(message.GetRawText()) is not JsonObject assistant)
+        {
+            return message.Clone();
+        }
+
+        if (!assistant.ContainsKey("finish_reason") &&
+            choice.TryGetProperty("finish_reason", out var finishReason) &&
+            finishReason.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            assistant["finish_reason"] = JsonNode.Parse(finishReason.GetRawText());
+        }
+
+        using var document = JsonDocument.Parse(assistant.ToJsonString());
+        return document.RootElement.Clone();
     }
 
     private static bool TryParseJson(string? text, out JsonNode? node)

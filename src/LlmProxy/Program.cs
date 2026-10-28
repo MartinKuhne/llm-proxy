@@ -115,7 +115,14 @@ if (app.Environment.IsDevelopment())
 
 app.UseSerilogRequestLogging();
 
+// Operator pages (conversation list and replay) are plain static files under wwwroot.
+app.UseStaticFiles();
+
 app.MapGet("/", () => Results.Redirect("/admin"));
+
+// Friendly entry points for the conversation pages; the pages read their parameters from the query string.
+app.MapGet("/admin/conversations", () => Results.Redirect("/conversations.html"));
+app.MapGet("/admin/conversation/{id}", (string id) => Results.Redirect($"/conversation.html?id={Uri.EscapeDataString(id)}"));
 
 app.MapControllers();
 

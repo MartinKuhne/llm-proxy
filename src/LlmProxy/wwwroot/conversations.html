@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conversations — llm-proxy Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%232563eb'/><text x='50' y='68' font-size='58' font-family='system-ui,sans-serif' font-weight='700' fill='white' text-anchor='middle'>L</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+    h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+    button { padding: 0.45rem 1rem; cursor: pointer; border-radius: 6px; font-size: 0.9rem; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: #2563eb; color: #fff; border: none; }
+    .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+    .btn-secondary { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+    .btn-secondary:hover:not(:disabled) { background: #f9fafb; }
+    input[type="date"], select { padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.88rem; }
+    th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    th { background: #f9fafb; font-weight: 600; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+    .err { background: #fee2e2; color: #991b1b; }
+    .muted { color: #6b7280; font-size: 0.85rem; }
+    .empty { color: #9ca3af; font-style: italic; }
+    .failed { color: #991b1b; }
+    .nav-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+    .nav-tab { padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.9rem; color: #374151; text-decoration: none; }
+    .nav-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .nav-tab:hover:not(.active) { background: #f9fafb; }
+    .filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 0.75rem; }
+    .filters .field { display: flex; flex-direction: column; gap: 0.25rem; }
+    .filters label { font-weight: 600; font-size: 0.8rem; color: #374151; }
+    .filters .actions { flex-direction: row; gap: 0.5rem; }
+    .pager { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.75rem; }
+    .title-link { color: #2563eb; text-decoration: none; font-weight: 500; }
+    .title-link:hover { text-decoration: underline; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+  <h1>Conversation Audit Log</h1>
+
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/admin">Admin</a>
+    <a class="nav-tab active" href="/conversations.html">Conversations</a>
+  </div>
+
+  <div class="filters">
+    <div class="field">
+      <label for="fromDate">From</label>
+      <input type="date" id="fromDate">
+    </div>
+    <div class="field">
+      <label for="toDate">To</label>
+      <input type="date" id="toDate">
+    </div>
+    <div class="field">
+      <label for="pageSize">Per page</label>
+      <select id="pageSize">
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
+    <div class="field actions">
+      <button class="btn-primary" id="applyBtn" type="button">Apply</button>
+      <button class="btn-secondary" id="resetBtn" type="button">Reset</button>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Last activity</th>
+        <th>Title</th>
+        <th>Provider</th>
+        <th>Model</th>
+        <th class="num">Turns</th>
+        <th class="num">Events</th>
+        <th class="num">Total tokens</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div class="pager">
+    <button class="btn-secondary" id="prevBtn" type="button">&#8592; Prev</button>
+    <span class="muted" id="pageInfo"></span>
+    <button class="btn-secondary" id="nextBtn" type="button">Next &#8594;</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    const PAGE_SIZES = [25, 50, 100];
+    const DEFAULT_PAGE_SIZE = 50;
+    const COLUMN_COUNT = 7;
+
+    function esc(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function fmt(n) { return Number(n || 0).toLocaleString(); }
+
+    function fmtDateTime(iso) {
+      if (!iso) return '—';
+      const date = new Date(iso);
+      return isNaN(date.getTime()) ? String(iso) : date.toLocaleString();
+    }
+
+    function dateOnly(value) {
+      return /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value : '';
+    }
+
+    function readState() {
+      const params = new URLSearchParams(location.search);
+      const pageSize = Number(params.get('pageSize'));
+      const page = Number(params.get('page'));
+      return {
+        from: dateOnly(params.get('from')),
+        to: dateOnly(params.get('to')),
+        page: Number.isFinite(page) && page > 1 ? Math.floor(page) : 1,
+        pageSize: PAGE_SIZES.includes(pageSize) ? pageSize : DEFAULT_PAGE_SIZE,
+      };
+    }
+
+    function toQuery(state) {
+      const params = new URLSearchParams();
+      if (state.from) params.set('from', state.from);
+      if (state.to) params.set('to', state.to);
+      if (state.page > 1) params.set('page', String(state.page));
+      if (state.pageSize !== DEFAULT_PAGE_SIZE) params.set('pageSize', String(state.pageSize));
+      const query = params.toString();
+      return query ? '?' + query : '';
+    }
+
+    let state = readState();
+
+    function syncControls() {
+      document.getElementById('fromDate').value = state.from;
+      document.getElementById('toDate').value = state.to;
+      document.getElementById('pageSize').value = String(state.pageSize);
+    }
+
+    function setPager(page, totalPages, totalCount, enabled) {
+      const pages = Math.max(totalPages || 0, 1);
+      document.getElementById('pageInfo').textContent =
+        'Page ' + page + ' of ' + pages + ' · ' + fmt(totalCount) + ' conversation(s)';
+      document.getElementById('prevBtn').disabled = !enabled || page <= 1;
+      document.getElementById('nextBtn').disabled = !enabled || page >= totalPages;
+    }
+
+    function messageRow(html, cls) {
+      document.getElementById('rows').innerHTML =
+        '<tr><td colspan="' + COLUMN_COUNT + '" class="' + cls + '">' + html + '</td></tr>';
+      setPager(state.page, 1, 0, false);
+    }
+
+    async function load() {
+      messageRow('Loading conversations…', 'empty');
+
+      let data;
+      try {
+        const response = await fetch('/admin/api/conversations' + toQuery(state));
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        data = await response.json();
+      } catch (err) {
+        messageRow('Failed to load conversations: ' + esc(err && err.message ? err.message : err), 'failed');
+        return;
+      }
+
+      const items = Array.isArray(data.items) ? data.items : [];
+      const totalPages = Number(data.totalPages) || 0;
+      const totalCount = Number(data.totalCount) || 0;
+
+      // A page beyond the end (a stale or shared link, or a filter that shrank the result) falls back to the last page.
+      if (items.length === 0 && totalPages > 0 && state.page > totalPages) {
+        goTo({ ...state, page: totalPages }, true);
+        return;
+      }
+
+      const tbody = document.getElementById('rows');
+      tbody.innerHTML = '';
+
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="' + COLUMN_COUNT + '" class="empty">No conversations recorded</td></tr>';
+      } else {
+        items.forEach(item => tbody.appendChild(rowFor(item)));
+      }
+
+      setPager(Number(data.page) || state.page, totalPages, totalCount, items.length > 0);
+    }
+
+    function rowFor(item) {
+      const row = document.createElement('tr');
+      const href = '/conversation.html?id=' + encodeURIComponent(item.id ?? '');
+      const title = item.title || '(untitled)';
+      const errorBadge = item.hasErrors
+        ? ' <span class="err badge" title="An upstream failure was recorded in this conversation">error</span>'
+        : '';
+
+      row.innerHTML =
+        '<td title="' + esc(item.lastActivityAt ?? '') + '">' + esc(fmtDateTime(item.lastActivityAt)) + '</td>' +
+        '<td><a class="title-link" href="' + esc(href) + '">' + esc(title) + '</a>' + errorBadge + '</td>' +
+        '<td>' + esc(item.provider || '—') + '</td>' +
+        '<td>' + esc(item.model || '—') + '</td>' +
+        '<td class="num">' + fmt(item.turnCount) + '</td>' +
+        '<td class="num">' + fmt(item.eventCount) + '</td>' +
+        '<td class="num">' + fmt(item.totalTokens) + '</td>';
+      return row;
+    }
+
+    function goTo(next, replace) {
+      state = next;
+      const url = location.pathname + toQuery(state);
+      if (replace) {
+        history.replaceState(null, '', url);
+      } else {
+        history.pushState(null, '', url);
+      }
+      load();
+    }
+
+    function fromControls() {
+      return {
+        from: dateOnly(document.getElementById('fromDate').value),
+        to: dateOnly(document.getElementById('toDate').value),
+        page: 1,
+        pageSize: PAGE_SIZES.includes(Number(document.getElementById('pageSize').value))
+          ? Number(document.getElementById('pageSize').value)
+          : DEFAULT_PAGE_SIZE,
+      };
+    }
+
+    document.getElementById('applyBtn').addEventListener('click', () => goTo(fromControls(), false));
+    document.getElementById('pageSize').addEventListener('change', () => goTo(fromControls(), false));
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      document.getElementById('fromDate').value = '';
+      document.getElementById('toDate').value = '';
+      document.getElementById('pageSize').value = String(DEFAULT_PAGE_SIZE);
+      goTo({ from: '', to: '', page: 1, pageSize: DEFAULT_PAGE_SIZE }, false);
+    });
+    document.getElementById('prevBtn').addEventListener('click', () => goTo({ ...state, page: Math.max(1, state.page - 1) }, false));
+    document.getElementById('nextBtn').addEventListener('click', () => goTo({ ...state, page: state.page + 1 }, false));
+    window.addEventListener('popstate', () => { state = readState(); syncControls(); load(); });
+
+    syncControls();
+    load();
+  </script>
+</body>
+</html>

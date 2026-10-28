@@ -142,6 +142,67 @@ public class AuditBodyCaptureTests
     }
 
     [Fact]
+    public void BuildBufferedResponse_FinishReasonOnTheChoice_IsCopiedIntoTheAssistantMessage()
+    {
+        // OpenAI reports finish_reason on the choice, not inside the message.
+        var response = Buffered("""
+            {"choices":[{"index":0,"message":{"role":"assistant","content":"Sunny"},"finish_reason":"stop"}]}
+            """);
+
+        Assert.Equal("Sunny", response.AssistantMessage!.Value.GetProperty("content").GetString());
+        Assert.Equal("stop", response.AssistantMessage.Value.GetProperty("finish_reason").GetString());
+    }
+
+    [Fact]
+    public void BuildBufferedResponse_MessageCarriesItsOwnFinishReason_IsNotOverwrittenByTheChoice()
+    {
+        var response = Buffered("""
+            {"choices":[{"index":0,"message":{"role":"assistant","content":"Sunny","finish_reason":"stop"},"finish_reason":"length"}]}
+            """);
+
+        Assert.Equal("stop", response.AssistantMessage!.Value.GetProperty("finish_reason").GetString());
+    }
+
+    [Fact]
+    public void BuildBufferedResponse_NoFinishReasonAnywhere_LeavesTheAssistantMessageUsable()
+    {
+        var response = Buffered("""
+            {"choices":[{"index":0,"message":{"role":"assistant","content":"Sunny"},"finish_reason":null}]}
+            """);
+
+        Assert.Equal("Sunny", response.AssistantMessage!.Value.GetProperty("content").GetString());
+        Assert.False(response.AssistantMessage.Value.TryGetProperty("finish_reason", out _));
+    }
+
+    [Fact]
+    public void BuildBufferedResponse_ToolCallFinishReason_IsCopiedIntoTheAssistantMessage()
+    {
+        var response = Buffered("""
+            {"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","function":{"name":"read_file","arguments":"{\"path\":\"a.cs\"}"}}]},"finish_reason":"tool_calls"}]}
+            """);
+
+        Assert.Equal("tool_calls", response.AssistantMessage!.Value.GetProperty("finish_reason").GetString());
+        Assert.Equal("read_file", response.AssistantMessage.Value.GetProperty("tool_calls")[0].GetProperty("function").GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void BuildBufferedResponse_FinishReasonOnTheChoice_ReachesTheResponseEvent()
+    {
+        // The regression this guards: the response event reads finish_reason off the assistant message, so the
+        // choice-level value has to be folded in by the capture.
+        var response = Buffered("""
+            {"choices":[{"index":0,"message":{"role":"assistant","content":"Sunny"},"finish_reason":"stop"}],"usage":{"total_tokens":14}}
+            """);
+
+        var data = ConversationEventFactory.FromResponse(response, 4096)
+            .Single(evt => evt.Kind == ConversationEventKind.Response)
+            .Data!.Value;
+
+        Assert.Equal("stop", data.GetProperty("finishReason").GetString());
+        Assert.Equal(14, data.GetProperty("usage").GetProperty("total_tokens").GetInt32());
+    }
+
+    [Fact]
     public void BuildBufferedResponse_EndpointWithoutAssistantMessage_KeepsTheWholeBodyAsRaw()
     {
         var response = Buffered("""{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}]}""");

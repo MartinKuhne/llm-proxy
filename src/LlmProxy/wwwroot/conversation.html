@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conversation — llm-proxy Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%232563eb'/><text x='50' y='68' font-size='58' font-family='system-ui,sans-serif' font-weight='700' fill='white' text-anchor='middle'>L</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1rem; margin: 1.75rem 0 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.4rem; }
+    button { padding: 0.45rem 1rem; cursor: pointer; border-radius: 6px; font-size: 0.9rem; }
+    .btn-secondary { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+    .btn-secondary:hover { background: #f9fafb; }
+    .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+    .ok { background: #dcfce7; color: #166534; }
+    .err { background: #fee2e2; color: #991b1b; }
+    .auto { background: #dbeafe; color: #1e40af; }
+    .muted { color: #6b7280; font-size: 0.85rem; }
+    .empty { color: #9ca3af; font-style: italic; }
+    .failed { color: #991b1b; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { font-size: 0.82rem; }
+    .nav-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+    .nav-tab { padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.9rem; color: #374151; text-decoration: none; }
+    .nav-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .nav-tab:hover:not(.active) { background: #f9fafb; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem; }
+    .stat-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.6rem 0.8rem; }
+    .stat-card .label { font-size: 0.75rem; color: #6b7280; margin-bottom: 0.2rem; }
+    .stat-card .value { font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
+    .turn { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+    .turn-head { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.6rem; border-bottom: 1px dashed #e5e7eb; padding-bottom: 0.35rem; }
+    .event { border-left: 3px solid #e5e7eb; padding: 0.4rem 0 0.4rem 0.75rem; margin-bottom: 0.6rem; }
+    .event-request { border-left-color: #2563eb; }
+    .event-thinking { border-left-color: #d1d5db; }
+    .event-tool_call { border-left-color: #f59e0b; }
+    .event-tool_result { border-left-color: #10b981; }
+    .event-response { border-left-color: #16a34a; }
+    .event-error { border-left-color: #dc2626; background: #fef2f2; border-radius: 0 6px 6px 0; }
+    .kind { font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #374151; margin-right: 0.4rem; }
+    .msg { margin: 0.4rem 0; }
+    .msg-role { font-size: 0.75rem; font-weight: 600; color: #6b7280; margin-bottom: 0.15rem; }
+    .msg-content { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.5rem 0.6rem; font-size: 0.85rem; max-height: 340px; overflow-y: auto; }
+    .msg-user .msg-content { background: #fff; }
+    .msg-assistant .msg-content { background: #eff6ff; border-color: #bfdbfe; }
+    .thinking { font-style: italic; color: #4b5563; background: #f3f4f6; }
+    pre.code { margin: 0.35rem 0 0; padding: 0.5rem 0.6rem; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+    .error-body { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    details.raw { margin-top: 0.4rem; }
+    details.raw summary { cursor: pointer; font-size: 0.78rem; color: #6b7280; }
+    details.raw summary:hover { color: #2563eb; }
+    .usage { margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .usage-chip { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; padding: 0.1rem 0.5rem; font-size: 0.75rem; color: #374151; }
+  </style>
+</head>
+<body>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/admin">Admin</a>
+    <a class="nav-tab" href="/conversations.html">Conversations</a>
+  </div>
+
+  <p><a class="btn-secondary" id="backLink" href="/conversations.html" style="padding:0.35rem 0.75rem;border-radius:6px;text-decoration:none;display:inline-block;">&larr; Back to conversations</a></p>
+
+  <h1 id="convTitle">Conversation</h1>
+  <p class="muted" id="convSub"></p>
+  <div class="stat-grid" id="header"></div>
+  <p id="status"></p>
+  <div id="timeline"></div>
+
+  <script>
+    'use strict';
+
+    const KIND_CLASS = {
+      request: 'request',
+      thinking: 'thinking',
+      tool_call: 'tool_call',
+      tool_result: 'tool_result',
+      response: 'response',
+      error: 'error',
+    };
+
+    function esc(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function fmt(n) { return Number(n || 0).toLocaleString(); }
+
+    function fmtDateTime(iso) {
+      if (!iso) return '—';
+      const date = new Date(iso);
+      return isNaN(date.getTime()) ? String(iso) : date.toLocaleString();
+    }
+
+    function pretty(value) {
+      if (value === undefined || value === null) return 'null';
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return String(value);
+      }
+    }
+
+    /** Stable JSON text: object keys sorted, so the same message re-encodes identically from any turn. */
+    function canonical(value) {
+      if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+      if (value && typeof value === 'object') {
+        return '{' + Object.keys(value).sort()
+          .map(key => JSON.stringify(key) + ':' + canonical(value[key]))
+          .join(',') + '}';
+      }
+      return JSON.stringify(value === undefined ? null : value);
+    }
+
+    /**
+     * Messages of a resent prompt that were not rendered in an earlier turn.
+     *
+     * Clients resend the whole history every turn, so each message is keyed by its canonical JSON and counted.
+     * A message is new only when this turn contains it more often than the conversation has already rendered it,
+     * which keeps repeated identical messages visible and re-sent ones hidden. `role=tool` messages are never
+     * rendered here because the log carries them as dedicated `tool_result` events.
+     */
+    function freshMessages(messages, seen) {
+      const counts = new Map();
+      const fresh = [];
+
+      messages.forEach(message => {
+        const key = canonical(message);
+        const occurrence = (counts.get(key) || 0) + 1;
+        counts.set(key, occurrence);
+
+        const role = message && typeof message === 'object' ? message.role : null;
+        if (role !== 'tool' && occurrence > (seen.get(key) || 0)) {
+          fresh.push(message);
+        }
+      });
+
+      counts.forEach((count, key) => seen.set(key, Math.max(count, seen.get(key) || 0)));
+      return fresh;
+    }
+
+    /**
+     * Registers the assistant message the client will echo back on its next request, so the answer already shown
+     * as this turn's `response` event is not rendered again as a prompt message in the following turn.
+     */
+    function registerAssistantEcho(seen, data, toolCalls) {
+      const message = {
+        role: 'assistant',
+        content: data.content === undefined || data.content === '' ? null : data.content,
+      };
+      if (toolCalls.length > 0) {
+        message.tool_calls = toolCalls.map(call => ({
+          id: call.id ?? null,
+          type: 'function',
+          function: { name: call.name ?? null, arguments: call.arguments ?? null },
+        }));
+      }
+
+      const key = canonical(message);
+      seen.set(key, (seen.get(key) || 0) + 1);
+    }
+
+    function contentHtml(content) {
+      if (content === null || content === undefined || content === '') {
+        return '<span class="empty">(empty)</span>';
+      }
+      if (typeof content === 'string') {
+        return esc(content);
+      }
+      if (Array.isArray(content)) {
+        return content.map(part => {
+          if (typeof part === 'string') return esc(part);
+          if (!part || typeof part !== 'object') return esc(String(part));
+          if (typeof part.text === 'string') return esc(part.text);
+          if (part.type === 'image_url') {
+            const url = part.image_url && typeof part.image_url === 'object' ? part.image_url.url : part.image_url;
+            return '<span class="muted">[image] ' + esc(url ?? '') + '</span>';
+          }
+          return '<pre class="code">' + esc(pretty(part)) + '</pre>';
+        }).join('<br>');
+      }
+      return '<pre class="code">' + esc(pretty(content)) + '</pre>';
+    }
+
+    function messageHtml(message) {
+      const object = message && typeof message === 'object' ? message : {};
+      const role = typeof object.role === 'string' ? object.role : 'unknown';
+      const label = typeof object.name === 'string' && object.name ? role + ' · ' + object.name : role;
+      const css = role === 'user' || role === 'assistant' || role === 'system' ? role : 'system';
+
+      return '<div class="msg msg-' + css + '">' +
+        '<div class="msg-role">' + esc(label) + '</div>' +
+        '<div class="msg-content">' + contentHtml(object.content) + '</div>' +
+        '</div>';
+    }
+
+    function prettyArguments(argumentsValue) {
+      if (argumentsValue === null || argumentsValue === undefined) return 'null';
+      if (typeof argumentsValue === 'string') {
+        try {
+          return JSON.stringify(JSON.parse(argumentsValue), null, 2);
+        } catch {
+          return argumentsValue;
+        }
+      }
+      return pretty(argumentsValue);
+    }
+
+    function usageHtml(usage) {
+      if (!usage || typeof usage !== 'object') return '';
+
+      const cached = usage.prompt_tokens_details && typeof usage.prompt_tokens_details === 'object'
+        ? usage.prompt_tokens_details.cached_tokens
+        : undefined;
+      const chips = [
+        ['prompt', usage.prompt_tokens],
+        ['completion', usage.completion_tokens],
+        ['total', usage.total_tokens],
+        ['cached', cached],
+      ].filter(([, value]) => value !== undefined && value !== null);
+
+      if (chips.length === 0) return '';
+      return '<div class="usage">' + chips.map(([label, value]) =>
+        '<span class="usage-chip">' + esc(label) + ' <strong>' + fmt(value) + '</strong></span>').join('') + '</div>';
+    }
+
+    function renderRequest(data, seen) {
+      const messages = data.body && Array.isArray(data.body.messages) ? data.body.messages : null;
+
+      if (!messages) {
+        return '<div class="kind">request</div>' +
+          '<p class="muted">This request body holds no chat messages (multipart upload or raw text) — see the raw payload below.</p>';
+      }
+
+      const fresh = freshMessages(messages, seen);
+      let html = '<div><span class="kind">request</span>' +
+        '<span class="muted">' + fmt(fresh.length) + ' new message(s) · ' + fmt(messages.length) + ' sent</span></div>';
+
+      if (fresh.length === 0) {
+        return html + '<p class="muted">No new messages: the client resent the history already shown above.</p>';
+      }
+      return html + '<div class="messages">' + fresh.map(messageHtml).join('') + '</div>';
+    }
+
+    function renderThinking(data) {
+      return '<div class="kind">thinking</div>' +
+        '<div class="msg-content thinking">' + contentHtml(data.content) + '</div>';
+    }
+
+    function renderToolCall(data) {
+      return '<div><span class="kind">tool_call</span><code>' + esc(data.name || '(unnamed tool)') + '</code>' +
+        (data.id ? '<span class="muted"> · call <code>' + esc(data.id) + '</code></span>' : '') + '</div>' +
+        '<pre class="code">' + esc(prettyArguments(data.arguments)) + '</pre>';
+    }
+
+    function renderToolResult(data) {
+      return '<div><span class="kind">tool_result</span>' +
+        (data.name ? '<code>' + esc(data.name) + '</code> ' : '') +
+        '<span class="muted">answers call <code>' + esc(data.toolCallId || 'unknown') + '</code></span></div>' +
+        '<div class="msg-content">' + contentHtml(data.content) + '</div>';
+    }
+
+    function renderResponse(data, seen, toolCalls) {
+      const badges = [];
+      if (data.finishReason) badges.push('<span class="badge auto">' + esc(data.finishReason) + '</span>');
+      if (data.streamed) badges.push('<span class="badge auto">streamed</span>');
+
+      let html = '<div><span class="kind">response</span>' + badges.join(' ') + '</div>';
+
+      if ((data.content === undefined || data.content === null || data.content === '') && data.raw !== undefined) {
+        html += '<div class="muted">Raw upstream body — this endpoint returned no assistant message:</div>' +
+          '<pre class="code">' + esc(pretty(data.raw)) + '</pre>';
+      } else {
+        html += '<div class="msg-content">' + contentHtml(data.content) + '</div>';
+      }
+
+      html += usageHtml(data.usage);
+      registerAssistantEcho(seen, data, toolCalls);
+      return html;
+    }
+
+    function renderError(data) {
+      const body = data.body === undefined || data.body === null ? '(no body recorded)' :
+        typeof data.body === 'string' ? data.body : pretty(data.body);
+
+      return '<div><span class="kind">error</span>' +
+        '<span class="badge err">HTTP ' + esc(data.statusCode ?? 'unknown') + '</span></div>' +
+        '<pre class="code error-body">' + esc(body) + '</pre>';
+    }
+
+    function rawBlock(evt) {
+      return '<details class="raw"><summary>Raw event JSON</summary><pre class="code">' +
+        esc(pretty(evt)) + '</pre></details>';
+    }
+
+    function renderEvent(evt, seen, toolCalls) {
+      const data = evt.data && typeof evt.data === 'object' ? evt.data : {};
+      const css = KIND_CLASS[evt.kind] || 'unknown';
+      let inner;
+
+      switch (evt.kind) {
+        case 'request':     inner = renderRequest(data, seen); break;
+        case 'thinking':    inner = renderThinking(data); break;
+        case 'tool_call':   inner = renderToolCall(data); break;
+        case 'tool_result': inner = renderToolResult(data); break;
+        case 'response':    inner = renderResponse(data, seen, toolCalls); break;
+        case 'error':       inner = renderError(data); break;
+        default:
+          inner = '<div class="kind">' + esc(evt.kind || 'unknown') + '</div>' +
+            '<p class="muted">No renderer for this event kind — see the raw payload below.</p>';
+      }
+
+      return '<div class="event event-' + css + '">' + inner + rawBlock(evt) + '</div>';
+    }
+
+    function groupByRequest(events) {
+      const groups = [];
+      const byRequestId = new Map();
+
+      events.forEach(evt => {
+        const key = typeof evt.requestId === 'string' && evt.requestId ? evt.requestId : '(no request id)';
+        if (!byRequestId.has(key)) {
+          const group = { requestId: key, events: [] };
+          byRequestId.set(key, group);
+          groups.push(group);
+        }
+        byRequestId.get(key).events.push(evt);
+      });
+
+      return groups;
+    }
+
+    function renderTurn(group, turnNumber, seen) {
+      const first = group.events[0] || {};
+      const toolCalls = group.events.filter(evt => evt.kind === 'tool_call').map(evt => evt.data || {});
+
+      const head = '<div class="turn-head">Turn ' + turnNumber +
+        '<span class="muted"> · ' + esc(fmtDateTime(first.timestamp)) +
+        (group.requestId === '(no request id)' ? '' : ' · request <code>' + esc(group.requestId) + '</code>') +
+        '</span></div>';
+
+      return '<section class="turn">' + head +
+        group.events.map(evt => renderEvent(evt, seen, toolCalls)).join('') +
+        '</section>';
+    }
+
+    function renderHeader(detail) {
+      const title = detail.title || '(untitled)';
+      document.getElementById('convTitle').innerHTML = esc(title) +
+        (detail.hasErrors ? ' <span class="badge err" title="An upstream failure was recorded">errors</span>' : '');
+      document.getElementById('convSub').innerHTML = 'Conversation <code>' + esc(detail.id) + '</code>';
+
+      const cards = [
+        ['Provider', esc(detail.provider || '—')],
+        ['Model', esc(detail.model || '—')],
+        ['Turns', fmt(detail.turnCount)],
+        ['Events', fmt(detail.eventCount)],
+        ['Total tokens', fmt(detail.totalTokens)],
+        ['Started', esc(fmtDateTime(detail.startedAt))],
+        ['Last activity', esc(fmtDateTime(detail.lastActivityAt))],
+      ];
+
+      document.getElementById('header').innerHTML = cards.map(([label, value]) =>
+        '<div class="stat-card"><div class="label">' + esc(label) + '</div><div class="value">' + value + '</div></div>').join('');
+    }
+
+    function setStatus(html, cls) {
+      document.getElementById('status').innerHTML = html ? '<p class="' + cls + '">' + html + '</p>' : '';
+    }
+
+    async function load(id) {
+      if (!id) {
+        setStatus('No conversation id given. Open this page as <code>/conversation.html?id=&lt;id&gt;</code>.', 'failed');
+        return;
+      }
+
+      setStatus('Loading conversation…', 'muted');
+
+      let detail;
+      try {
+        const response = await fetch('/admin/api/conversations/' + encodeURIComponent(id));
+        const payload = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          const serverMessage = payload && payload.error && payload.error.message
+            ? payload.error.message
+            : 'HTTP ' + response.status;
+          setStatus('Could not load conversation <code>' + esc(id) + '</code>: ' + esc(serverMessage), 'failed');
+          return;
+        }
+        detail = payload;
+      } catch (err) {
+        setStatus('Failed to reach the conversations API: ' + esc(err && err.message ? err.message : err), 'failed');
+        return;
+      }
+
+      setStatus('', '');
+      renderHeader(detail || {});
+
+      const events = detail && Array.isArray(detail.events) ? detail.events : [];
+      if (events.length === 0) {
+        document.getElementById('timeline').innerHTML =
+          '<p class="empty">This conversation has no recorded events.</p>';
+        return;
+      }
+
+      const seen = new Map();
+      document.getElementById('timeline').innerHTML =
+        groupByRequest(events).map((group, index) => renderTurn(group, index + 1, seen)).join('');
+    }
+
+    load(new URLSearchParams(location.search).get('id'));
+  </script>
+</body>
+</html>
