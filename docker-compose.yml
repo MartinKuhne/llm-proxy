@@ -6,10 +6,13 @@ services:
     build:
       context: ./src
       dockerfile: Dockerfile
+    # Local-only host publishing is the access boundary when the app runs in Docker.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       - ASPNETCORE_URLS=http://+:8080
+      # Docker's forwarded host connection is not loopback from inside the container.
+      - Admin__RequireLocalhost=false
     volumes:
       - usage-data:/app/logs
       - ~/.config/llm-proxy/providers.json:/app/providers.json:ro

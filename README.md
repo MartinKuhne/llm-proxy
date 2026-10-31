@@ -296,7 +296,8 @@ responses with token usage, and errors, each with a collapsible raw-JSON view.
 
 The operator surface — `/admin/*`, `/api/providers*` and the three operator pages — is
 restricted to the **loopback interface**. A request whose TCP peer is not `127.0.0.0/8` or
-`::1` gets `403`. The proxied API (`/v1/*`) is unaffected and stays reachable from anywhere.
+`::1` gets `403`. The proxied API (`/v1/*`) is unaffected by this middleware; its network
+reachability depends on how the application is hosted.
 
 This is deliberate: since the audit log exists, the admin surface exposes the full text of
 every user prompt, reasoning block and tool result, and the provider API reports provider
@@ -320,6 +321,19 @@ operator access, put a real authentication layer in front of it and then set
 | Key | Default | Description |
 |-----|---------|-------------|
 | `Admin:RequireLocalhost` | `true` | Operator surface answers loopback peers only |
+
+### Docker Compose: local-only access
+
+The Compose setup publishes port 8080 on the host's loopback interface only, so open
+`http://localhost:8080/admin` on the Docker host. It disables the application's peer-address
+check because Docker forwards the host connection into the container with a non-loopback peer
+address. The host-side loopback-only port binding is the access boundary for this setup; both
+the admin surface and `/v1` are therefore unavailable through the host's LAN interfaces.
+
+Because the peer-address check is disabled in the container, other containers attached to the
+same Docker network can also reach the admin surface directly. Only attach trusted services to
+that network. Do not change the published port to `8080:8080` unless you intend to expose both
+the admin surface and proxy API to other machines.
 
 ### Configuration
 
@@ -365,7 +379,7 @@ The application will start on `http://localhost:5000` by default.
 | `Conversations__Enabled` | Set to `false` to disable the conversation audit log |
 | `Conversations__Directory` | Where conversation files are written |
 | `Conversations__MaxFieldChars` | Truncate captured string fields beyond this size |
-| `Admin__RequireLocalhost` | Set to `false` to let remote peers reach the operator surface |
+| `Admin__RequireLocalhost` | Set to `false` to disable the peer-address check; do this only when another network boundary protects the admin surface |
 
 ## License
 
