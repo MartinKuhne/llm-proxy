@@ -157,7 +157,16 @@ public class ProxyServiceFailoverTests
         var httpClient = new HttpClient(handler);
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
         httpClientFactory.CreateClient().Returns(httpClient);
-        var service = new ProxyService(_logger, providerManager, httpClientFactory, _tokenCountLogger, new ProvidersConfig());
+        var service = new ProxyService(
+            _logger,
+            providerManager,
+            httpClientFactory,
+            _tokenCountLogger,
+            new ProvidersConfig(),
+            Substitute.For<IConversationLogger>(),
+            new ConversationIdResolver(NullLogger<ConversationIdResolver>.Instance),
+            new AuditBodyCapture(NullLogger<AuditBodyCapture>.Instance),
+            NullLoggerFactory.Instance);
         var context = CreateContext("""{"model":"llm-proxy:auto","messages":[{"role":"user","content":"hi"}]}""");
 
         await service.ProxyAsync(context, "v1/chat/completions");
