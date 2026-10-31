@@ -42,6 +42,7 @@ Represents a single LLM provider endpoint.
 | `Capabilities` | `Dictionary<string, CapabilityConfig>?` | No | Supported capabilities |
 | `HasAllCapabilities` | `bool` | No | Whether provider supports all capabilities |
 | `AllowAutomatic` | `bool` | No | Whether included in auto-selection |
+| `AutoDiscovered` | `bool` | No | Whether the model was discovered automatically (excluded from auto-selection) |
 
 **Key Computation**:
 - Provider Key: `"{BaseUrl}|{Model}"` (Source: `ProviderManager.cs:107`)
@@ -278,6 +279,7 @@ Aggregated usage for a single day.
 │ + Capabilities: Dictionary<string, CapabilityConfig>?                  │
 │ + HasAllCapabilities: bool = true                                      │
 │ + AllowAutomatic: bool = true                                         │
+│ + AutoDiscovered: bool = false                                        │
 └─────────────────────────────────────────────────────────────────��─��─────────┘
                                     │
                                     │ 0:N

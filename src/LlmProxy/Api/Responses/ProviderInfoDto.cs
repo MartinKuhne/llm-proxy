@@ -15,6 +15,7 @@ namespace LlmProxy.Api.Responses;
     public string? LastErrorMessage { get; set; }
     public int? LastErrorStatusCode { get; set; }
     public string? LastErrorBody { get; set; }
+    public bool AutoDiscovered { get; set; }
     public int Cost { get; set; }
     public int Complexity { get; set; }
     public string? Description { get; set; }

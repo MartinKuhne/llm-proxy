@@ -150,6 +150,82 @@ public class ProviderManagerTests
     }
 
     [Fact]
+    public void GetBestProvider_ExcludesAutoDiscoveredProviders()
+    {
+        var config = new ProvidersConfig
+        {
+            Providers = new[]
+            {
+                new ProviderConfig("Configured", "http://configured.com", "key", 1, "configured-model"),
+                new ProviderConfig("Discovered", "http://discovered.com", "key", 1000, "discovered-model", AutoDiscovered: true)
+            }
+        };
+        var manager = new ProviderManager(config);
+
+        var result = manager.GetBestProvider();
+
+        Assert.NotNull(result);
+        Assert.Equal("Configured", result!.Name);
+    }
+
+    [Fact]
+    public void GetBestProvider_WithForcedAutoDiscoveredProvider_ReturnsForcedProvider()
+    {
+        var config = new ProvidersConfig
+        {
+            Providers = new[]
+            {
+                new ProviderConfig("Configured", "http://configured.com", "key", 1, "configured-model"),
+                new ProviderConfig("Discovered", "http://discovered.com", "key", 1000, "discovered-model", AutoDiscovered: true)
+            }
+        };
+        var manager = new ProviderManager(config);
+
+        manager.SetForcedProvider("http://discovered.com|discovered-model");
+
+        var result = manager.GetBestProvider();
+
+        Assert.NotNull(result);
+        Assert.Equal("Discovered", result!.Name);
+    }
+
+    [Fact]
+    public void GetBestProvider_WithOnlyAutoDiscoveredProviders_ReturnsNull()
+    {
+        var config = new ProvidersConfig
+        {
+            Providers = new[]
+            {
+                new ProviderConfig("Discovered", "http://discovered.com", "key", 1000, "discovered-model", AutoDiscovered: true)
+            }
+        };
+        var manager = new ProviderManager(config);
+
+        var result = manager.GetBestProvider();
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetProviderForCapability_ExcludesAutoDiscoveredProviders()
+    {
+        var config = new ProvidersConfig
+        {
+            Providers = new[]
+            {
+                new ProviderConfig("Configured", "http://configured.com", "key", 1, "configured-model", HasAllCapabilities: true),
+                new ProviderConfig("Discovered", "http://discovered.com", "key", 1000, "discovered-model", HasAllCapabilities: true, AutoDiscovered: true)
+            }
+        };
+        var manager = new ProviderManager(config);
+
+        var provider = manager.GetProviderForCapability("chat");
+
+        Assert.NotNull(provider);
+        Assert.Equal("Configured", provider!.Name);
+    }
+
+    [Fact]
     public void GetBestProvider_WithRecentError_ExcludesProvider()
     {
         var provider2 = _manager.GetAllProviders().First(p => p.Name == "Provider2");

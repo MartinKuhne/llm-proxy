@@ -69,6 +69,7 @@ public class AdminController : ControllerBase
                 Priority = p.Priority,
                 IsForced = p == forced,
                 IsAuto = p == auto,
+                AutoDiscovered = p.AutoDiscovered,
                 ErrorCount = state?.ErrorCount ?? 0,
                 LastError = state?.LastError,
                 LastErrorMessage = state?.LastErrorMessage,

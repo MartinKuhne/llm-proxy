@@ -54,7 +54,8 @@ public class ProxyService : IProxyService
         }
 
         var providers = new[] { bestProvider }
-            .Concat(_providerManager.GetAllProviders().Where(p => p != bestProvider && p.AllowAutomatic));
+            .Concat(_providerManager.GetAllProviders()
+                .Where(p => p != bestProvider && p.AllowAutomatic && !p.AutoDiscovered));
 
         foreach (var provider in providers)
         {

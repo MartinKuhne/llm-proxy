@@ -100,7 +100,8 @@ public class OpenRouterModelLoader(IHttpClientFactory httpClientFactory, ILogger
                     Description: model.Description ?? $"OpenRouter free model: {modelName}",
                     Capabilities: null,
                     HasAllCapabilities: true,
-                    AllowAutomatic: true
+                    AllowAutomatic: true,
+                    AutoDiscovered: true
                 );
 
                 openRouterProviders.Add(providerConfig);
