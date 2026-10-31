@@ -17,7 +17,11 @@ public class ParseUsageFromResponseTests
             providerManager: Substitute.For<IProviderManager>(),
             httpClientFactory: Substitute.For<IHttpClientFactory>(),
             tokenCountLogger: Substitute.For<ITokenCountLogger>(),
-            providersConfig: new ProvidersConfig());
+            providersConfig: new ProvidersConfig(),
+            conversationLogger: Substitute.For<IConversationLogger>(),
+            conversationIdResolver: new ConversationIdResolver(new Microsoft.Extensions.Logging.Abstractions.NullLogger<ConversationIdResolver>()),
+            auditBodyCapture: new AuditBodyCapture(new Microsoft.Extensions.Logging.Abstractions.NullLogger<AuditBodyCapture>()),
+            loggerFactory: Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
     }
 
     [Fact]

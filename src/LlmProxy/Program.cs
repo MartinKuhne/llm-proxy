@@ -1,4 +1,6 @@
 using Serilog;
+using LlmProxy.Api.Middleware;
+using LlmProxy.Application;
 using LlmProxy.Application.Configuration;
 using LlmProxy.Application.Services;
 using System.Text.Json;
@@ -49,6 +51,29 @@ builder.Services.AddSingleton(providersConfig);
 builder.Services.AddHttpClient();
 builder.Services.ConfigureHttpClientDefaults(b =>
     b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(600)));
+
+// Conversation audit log: the optional "Conversations" section overrides the defaults. The configured directory is
+// published through AppPaths so the logger and the index always read and write the same folder.
+var conversationOptions = builder.Configuration.GetSection("Conversations").Get<ConversationOptions>() ?? new ConversationOptions();
+if (!string.IsNullOrWhiteSpace(conversationOptions.Directory))
+{
+    AppPaths.ConversationDirectory = conversationOptions.Directory;
+}
+
+builder.Services.AddSingleton(conversationOptions);
+builder.Services.AddSingleton<ConversationIndex>();
+builder.Services.AddSingleton<ConversationLocks>();
+builder.Services.AddSingleton<ConversationIdResolver>();
+builder.Services.AddSingleton<AuditBodyCapture>();
+
+// Operator surface access: on by default, the admin API, provider API and operator pages answer loopback only.
+builder.Services.AddSingleton(builder.Configuration.GetSection("Admin").Get<AdminAccessOptions>() ?? new AdminAccessOptions());
+
+// The logger holds no per-request state, so one instance serves the whole process: its constructor creates the
+// conversation directory once instead of on every proxied request.
+builder.Services.AddSingleton<IConversationLogger, FileConversationLogger>();
+builder.Services.AddScoped<IConversationReader, FileConversationReader>();
+
 builder.Services.AddScoped<ITokenCountLogger, FileTokenCountLogger>();
 builder.Services.AddScoped<IUsageReader, FileUsageReader>();
 builder.Services.AddScoped<IProxyService, ProxyService>();
@@ -79,6 +104,19 @@ foreach (var provider in providers)
         provider.Name, provider.BaseUrl, provider.Model, provider.SendMaxCompletionTokens, provider.Priority);
 }
 
+// Load the conversation index here rather than on the first proxied request, so the whole first-read cost does not
+// land on a user. A failure is not fatal and is not treated as loaded: the index keeps its rebuild and retries
+// after its own back-off instead of re-running it on every request.
+var conversationIndex = app.Services.GetRequiredService<ConversationIndex>();
+try
+{
+    await conversationIndex.EnsureLoadedAsync();
+}
+catch (Exception ex)
+{
+    startupLogger.LogWarning(ex, "Conversation index could not be loaded at startup; the audit log will retry it later");
+}
+
 // Global exception handler for unhandled exceptions
 app.UseExceptionHandler(exceptionHandlerApp =>
 {
@@ -98,7 +136,17 @@ if (app.Environment.IsDevelopment())
 
 app.UseSerilogRequestLogging();
 
+// Gate the operator surface before anything can serve it: static files and controllers both sit behind this.
+app.UseMiddleware<AdminAccessMiddleware>();
+
+// Operator pages (conversation list and replay) are plain static files under wwwroot.
+app.UseStaticFiles();
+
 app.MapGet("/", () => Results.Redirect("/admin"));
+
+// Friendly entry points for the conversation pages; the pages read their parameters from the query string.
+app.MapGet("/admin/conversations", () => Results.Redirect("/conversations.html"));
+app.MapGet("/admin/conversation/{id}", (string id) => Results.Redirect($"/conversation.html?id={Uri.EscapeDataString(id)}"));
 
 app.MapControllers();
 

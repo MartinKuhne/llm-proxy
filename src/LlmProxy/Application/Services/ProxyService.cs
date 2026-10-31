@@ -22,30 +22,68 @@ public class ProxyService : IProxyService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ITokenCountLogger _tokenCountLogger;
     private readonly ProvidersConfig _providersConfig;
+    private readonly IConversationLogger _conversationLogger;
+    private readonly ConversationIdResolver _conversationIdResolver;
+    private readonly AuditBodyCapture _auditBodyCapture;
+    private readonly ILoggerFactory _loggerFactory;
 
     public ProxyService(
         ILogger<ProxyService> logger,
         IProviderManager providerManager,
         IHttpClientFactory httpClientFactory,
         ITokenCountLogger tokenCountLogger,
-        ProvidersConfig providersConfig)
+        ProvidersConfig providersConfig,
+        IConversationLogger conversationLogger,
+        ConversationIdResolver conversationIdResolver,
+        AuditBodyCapture auditBodyCapture,
+        ILoggerFactory loggerFactory)
     {
         _logger = logger;
         _providerManager = providerManager;
         _httpClientFactory = httpClientFactory;
         _tokenCountLogger = tokenCountLogger;
         _providersConfig = providersConfig;
+        _conversationLogger = conversationLogger;
+        _conversationIdResolver = conversationIdResolver;
+        _auditBodyCapture = auditBodyCapture;
+        _loggerFactory = loggerFactory;
     }
 
     /// <summary>
-    /// Proxies requests to upstream providers with automatic failover.
+    /// Proxies requests to upstream providers with automatic failover, recording the conversation audit trail on the way.
     /// </summary>
     public async Task ProxyAsync(HttpContext context, string path, CancellationToken cancellationToken = default)
     {
         // Buffer the request body so it can be re-read on retry
         context.Request.EnableBuffering();
 
+        var auditBody = await _auditBodyCapture.CaptureRequestAsync(context.Request, cancellationToken);
+        var conversationId = _conversationIdResolver.Resolve(context.Request, auditBody);
+        var requestId = Guid.NewGuid().ToString("N");
+
+        // Tell the client which conversation its request landed in. A client that never sent the header cannot know
+        // the id derived from its opening messages, so without this it can only keep guessing and re-deriving;
+        // echoing it lets a cooperating client address its own conversation explicitly from the second turn on
+        // instead of relying on the derivation, which merges conversations that happen to open identically.
+        if (!context.Response.HasStarted)
+        {
+            context.Response.Headers[ConversationIdResolver.HeaderName] = conversationId;
+        }
+
         var bestProvider = GetProviderForRequest(context);
+
+        // Record the prompt before any provider is tried so it survives a crash mid-request.
+        await _conversationLogger.LogRequestAsync(
+            new ConversationRequest(
+                conversationId,
+                requestId,
+                DateTimeOffset.UtcNow,
+                bestProvider?.Name,
+                _auditBodyCapture.RequestedModel(auditBody),
+                path,
+                auditBody),
+            cancellationToken);
+
         if (bestProvider == null)
         {
             _logger.ProxyNoProviders();
@@ -65,9 +103,16 @@ public class ProxyService : IProxyService
 
             try
             {
-                var (forwarded, statusCode, responseBody) = await TryForwardAsync(context, provider, path, cancellationToken);
+                var (forwarded, statusCode, responseBody, response) = await TryForwardAsync(
+                    context, provider, path, conversationId, requestId, cancellationToken);
+
                 if (forwarded)
                 {
+                    if (response is not null)
+                    {
+                        await _conversationLogger.LogResponseAsync(response, cancellationToken);
+                    }
+
                     _providerManager.RecordSuccess(provider);
                     return;
                 }
@@ -78,6 +123,8 @@ public class ProxyService : IProxyService
                 }
 
                 _providerManager.RecordError(provider, "Upstream returned non-success status", statusCode: statusCode, responseBody: responseBody);
+                await _conversationLogger.LogFailureAsync(
+                    CreateFailure(provider, conversationId, requestId, path, statusCode, responseBody), cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -87,6 +134,8 @@ public class ProxyService : IProxyService
             {
                 _logger.ProxyError(provider.BaseUrl, ex.Message, ex);
                 _providerManager.RecordError(provider, ex.Message, ex);
+                await _conversationLogger.LogFailureAsync(
+                    CreateFailure(provider, conversationId, requestId, path, null, ex.Message), cancellationToken);
             }
         }
 
@@ -96,10 +145,21 @@ public class ProxyService : IProxyService
         }
     }
 
-    private async Task<(bool Success, int? StatusCode, string? ResponseBody)> TryForwardAsync(
+    private static ConversationFailure CreateFailure(
+        ProviderConfig provider,
+        string conversationId,
+        string requestId,
+        string path,
+        int? statusCode,
+        string? body) =>
+        new(conversationId, requestId, DateTimeOffset.UtcNow, provider.Name, provider.Model, path, statusCode, body);
+
+    private async Task<(bool Success, int? StatusCode, string? ResponseBody, ConversationResponse? Response)> TryForwardAsync(
         HttpContext context,
         ProviderConfig provider,
         string path,
+        string conversationId,
+        string requestId,
         CancellationToken cancellationToken)
     {
         var upstreamUrl = BuildUpstreamUrl(provider.BaseUrl, path, context.Request.QueryString);
@@ -168,7 +228,7 @@ public class ProxyService : IProxyService
                 _logger.ProxyUpstreamError(provider.BaseUrl, (int)upstreamResponse.StatusCode);
             }
             
-            return (false, (int)upstreamResponse.StatusCode, responseBody);
+            return (false, (int)upstreamResponse.StatusCode, responseBody, null);
         }
 
         // Write response status and headers before streaming the body
@@ -188,6 +248,7 @@ public class ProxyService : IProxyService
             // Read line-by-line so we can extract usage from the final data chunk
             using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new StreamReader(upstreamStream, Encoding.UTF8);
+            var assembler = new SseAssistantAssembler(_loggerFactory.CreateLogger<SseAssistantAssembler>());
             string? lastDataPayload = null;
             var packetCount = 0;
             var lastProgressLog = DateTime.UtcNow;
@@ -198,6 +259,7 @@ public class ProxyService : IProxyService
                 if (line.StartsWith("data: ", StringComparison.Ordinal) && line.Length > 6 && line[6..] != "[DONE]")
                 {
                     lastDataPayload = line[6..];
+                    assembler.Append(lastDataPayload);
                     packetCount++;
                     _logger.ProxySsePacket(provider.BaseUrl, lastDataPayload.Length);
 
@@ -214,6 +276,17 @@ public class ProxyService : IProxyService
 
             if (lastDataPayload != null)
                 await TryLogUsageAsync(Encoding.UTF8.GetBytes(lastDataPayload), provider, stopwatch.ElapsedMilliseconds, cancellationToken);
+
+            return (true, null, null, new ConversationResponse(
+                conversationId,
+                requestId,
+                DateTimeOffset.UtcNow,
+                provider.Name,
+                provider.Model,
+                path,
+                assembler.AssistantMessage,
+                assembler.Usage,
+                Streamed: true));
         }
         else
         {
@@ -222,9 +295,10 @@ public class ProxyService : IProxyService
             stopwatch.Stop();
             await context.Response.Body.WriteAsync(bytes, cancellationToken);
             await TryLogUsageAsync(bytes, provider, stopwatch.ElapsedMilliseconds, cancellationToken);
-        }
 
-        return (true, null, null);
+            return (true, null, null, _auditBodyCapture.BuildBufferedResponse(
+                bytes, provider, path, conversationId, requestId));
+        }
     }
 
     private async Task TryLogUsageAsync(byte[] responseBytes, ProviderConfig provider, long elapsedMs, CancellationToken cancellationToken)

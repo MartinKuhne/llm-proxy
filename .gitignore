@@ -43,6 +43,15 @@ sql/
 *.userosscache
 *.sln.docstates
 
+# Conversation audit logs (contain user content - never commit)
+conversations/
+
+# Runtime Serilog output, rolling daily as llm-proxy<yyyyMMdd>.log, and the conversation
+# audit directory that sits beside it. Ignored by directory rather than by extension so a
+# log is caught wherever it lands - the *.NUnit.log and msbuild.log rules above match
+# neither of these, and the audit directory is configurable so it is not always under logs/.
+logs/
+
 # Mac
 .DS_Store
 
