@@ -118,6 +118,7 @@ public class ProviderManager : IProviderManager
     {
         var capableProviders = GetCapableProviders(capability)
             .Where(IsProviderAvailable)
+            .Where(p => !p.AutoDiscovered)
             .Where(p =>
             {
                 if (maxCost.HasValue && p.Cost > maxCost.Value) return false;
@@ -173,6 +174,7 @@ public class ProviderManager : IProviderManager
 
         return _providers
             .Where(IsProviderAvailable)
+            .Where(p => !p.AutoDiscovered)
             .OrderByDescending(p => p.Priority)
             .FirstOrDefault();
     }

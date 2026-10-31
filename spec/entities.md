@@ -52,6 +52,7 @@ erDiagram
         Dictionary_CapabilityConfig_Capabilities
         bool HasAllCapabilities
         bool AllowAutomatic
+        bool AutoDiscovered
     }
 
     CapabilityConfig {

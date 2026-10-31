@@ -86,9 +86,11 @@ public class OpenRouterModelLoaderTests
 
         var existing = providers.First(p => p.Name == "Existing");
         Assert.Equal(100, existing.Priority);
+        Assert.False(existing.AutoDiscovered);
 
         var freeModel = providers.First(p => p.Name == "OpenRouter");
         Assert.Equal("model/free-model", freeModel.Model);
+        Assert.True(freeModel.AutoDiscovered);
         Assert.Equal(500, freeModel.Priority);
         Assert.Equal("https://openrouter.ai/api/v1", freeModel.BaseUrl);
         Assert.True(freeModel.HasAllCapabilities);

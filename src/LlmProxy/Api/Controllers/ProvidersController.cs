@@ -51,7 +51,8 @@ public class ProvidersController : ControllerBase
                 Features = c.Value.Features
             }).ToList(),
             HasAllCapabilities = p.HasAllCapabilities,
-            AllowAutomatic = p.AllowAutomatic
+            AllowAutomatic = p.AllowAutomatic,
+            AutoDiscovered = p.AutoDiscovered
         }).ToList();
 
         return Ok(new ProvidersList { Providers = providers, RetryDelaySeconds = _providersConfig.RetryDelaySeconds });
@@ -94,7 +95,8 @@ public class ProvidersController : ControllerBase
                 Features = c.Value.Features
             }).ToList(),
             HasAllCapabilities = provider.HasAllCapabilities,
-            AllowAutomatic = provider.AllowAutomatic
+            AllowAutomatic = provider.AllowAutomatic,
+            AutoDiscovered = provider.AutoDiscovered
         };
 
         return Ok(providerInfo);
@@ -143,7 +145,8 @@ public class ProvidersController : ControllerBase
             Description: providerInfo.Description,
             Capabilities: capabilities,
             HasAllCapabilities: providerInfo.HasAllCapabilities ?? true,
-            AllowAutomatic: providerInfo.AllowAutomatic ?? true);
+            AllowAutomatic: providerInfo.AllowAutomatic ?? true,
+            AutoDiscovered: providerInfo.AutoDiscovered ?? false);
 
         var providersList = _providersConfig.Providers.ToList();
         providersList.Add(newProvider);
@@ -180,7 +183,8 @@ public class ProvidersController : ControllerBase
             Description: providerInfo.Description ?? existingProvider.Description,
             Capabilities: MapCapabilities(providerInfo.Capabilities) ?? existingProvider.Capabilities,
             HasAllCapabilities: providerInfo.HasAllCapabilities ?? existingProvider.HasAllCapabilities,
-            AllowAutomatic: providerInfo.AllowAutomatic ?? existingProvider.AllowAutomatic);
+            AllowAutomatic: providerInfo.AllowAutomatic ?? existingProvider.AllowAutomatic,
+            AutoDiscovered: providerInfo.AutoDiscovered ?? existingProvider.AutoDiscovered);
 
         var providersList = _providersConfig.Providers.ToList();
         var index = providersList.FindIndex(p => p.ProviderKey == key || p.FullModelKey == key);
@@ -210,7 +214,8 @@ public class ProvidersController : ControllerBase
                 Features = c.Value.Features
             }).ToList(),
             HasAllCapabilities = updatedProvider.HasAllCapabilities,
-            AllowAutomatic = updatedProvider.AllowAutomatic
+            AllowAutomatic = updatedProvider.AllowAutomatic,
+            AutoDiscovered = updatedProvider.AutoDiscovered
         });
     }
 
@@ -299,6 +304,7 @@ public record ProviderInfo
     public List<CapabilityInfo>? Capabilities { get; set; }
     public bool? HasAllCapabilities { get; set; }
     public bool? AllowAutomatic { get; set; }
+    public bool? AutoDiscovered { get; set; }
 }
 
 public record CapabilityInfo

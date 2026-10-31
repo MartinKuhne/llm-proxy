@@ -134,6 +134,39 @@ public class ProxyServiceFailoverTests
     }
 
     [Fact]
+    public async Task ProxyAsync_WhenBestProviderFails_DoesNotFallBackToAutoDiscoveredProvider()
+    {
+        var bestProvider = new ProviderConfig("Best", "http://best.com", "key", 1, "best-model");
+        var discoveredProvider = new ProviderConfig(
+            "Discovered", "http://discovered.com", "key", 1000, "discovered-model", AutoDiscovered: true);
+
+        var providerManager = Substitute.For<IProviderManager>();
+        providerManager.GetBestProvider().Returns(bestProvider);
+        providerManager.GetAllProviders().Returns(new[] { bestProvider, discoveredProvider });
+
+        var callCount = 0;
+        var handler = new TestHandler(_ =>
+        {
+            callCount++;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError)
+            {
+                Content = new StringContent("""{"error":"internal error"}""")
+            };
+        });
+
+        var httpClient = new HttpClient(handler);
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        httpClientFactory.CreateClient().Returns(httpClient);
+        var service = new ProxyService(_logger, providerManager, httpClientFactory, _tokenCountLogger, new ProvidersConfig());
+        var context = CreateContext("""{"model":"llm-proxy:auto","messages":[{"role":"user","content":"hi"}]}""");
+
+        await service.ProxyAsync(context, "v1/chat/completions");
+
+        Assert.Equal(502, context.Response.StatusCode);
+        Assert.Equal(1, callCount);
+    }
+
+    [Fact]
     public async Task ProxyAsync_WhenAllProvidersFail_Returns502()
     {
         var handler = new TestHandler(_ => throw new HttpRequestException("Connection refused"));

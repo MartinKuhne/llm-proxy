@@ -22,7 +22,8 @@ public record ProviderConfig(
     string? Description = null,
     Dictionary<string, CapabilityConfig>? Capabilities = null,
     bool HasAllCapabilities = true,
-    bool AllowAutomatic = true)
+    bool AllowAutomatic = true,
+    bool AutoDiscovered = false)
 {
     /// <summary>
     /// Unique key derived from base URL and model, used for provider lookup and deduplication.

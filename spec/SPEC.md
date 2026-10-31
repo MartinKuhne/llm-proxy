@@ -230,6 +230,8 @@ erDiagram
 
 **REQ-019**: Model in format `providerName:model` MUST route to that specific provider.
 
+**REQ-020**: Models marked as auto-discovered MUST NOT be selected by automatic provider selection. They remain eligible when explicitly selected (e.g. via a forced provider).
+
 ---
 
 ## 5. Domain Types
@@ -249,7 +251,8 @@ record ProviderConfig(
     string? Description = null,
     Dictionary<string, CapabilityConfig>? Capabilities = null,
     bool HasAllCapabilities = true,
-    bool AllowAutomatic = true);
+    bool AllowAutomatic = true,
+    bool AutoDiscovered = false);
 
 record CapabilityConfig(
     string Name,
